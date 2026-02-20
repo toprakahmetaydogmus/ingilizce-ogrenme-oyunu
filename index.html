@@ -1326,24 +1326,7 @@ html{-webkit-text-size-adjust:100%;}
             </div>
 
 
-            
-
             <div class="row between wrap mt12">
-              <div>
-                <div class="label">TR Okuma Hakkı (İpucu)</div>
-                <div class="muted small">Türkçe okuma bir ipucu sayılır. Bu sekmede (session) kaç kez kullanabileceğini sınırla.</div>
-                <div class="muted small">Bu session: <span id="trHintUsage">0</span></div>
-              </div>
-              <select class="input input--sm" id="trHintLimit">
-                <option value="0">Sınırsız</option>
-                <option value="3">3</option>
-                <option value="5" selected>5 (varsayılan)</option>
-                <option value="10">10</option>
-                <option value="20">20</option>
-              </select>
-            </div>
-
-<div class="row between wrap mt12">
               <div>
                 <div class="label">Can (Hearts)</div>
                 <div class="muted small">Yanlışta azalır (Pratikte azalmaz)</div>
@@ -1609,8 +1592,6 @@ html{-webkit-text-size-adjust:100%;}
     trRate: $('#trRate'),
     autoSpeakFirstN: $('#autoSpeakFirstN'),
     maxHearts: $('#maxHearts'),
-    trHintLimit: $('#trHintLimit'),
-    trHintUsage: $('#trHintUsage'),
     btnSaveSettings: $('#btnSaveSettings'),
     btnResetProgress: $('#btnResetProgress'),
     btnRefreshDict: $('#btnRefreshDict'),
@@ -1961,7 +1942,6 @@ html{-webkit-text-size-adjust:100%;}
     trRate: 0.95,
     autoSpeakFirstN: 3,
     maxHearts: 5,
-    trHintLimit: 5, // Turkish TTS is a hint; limit per session (0=unlimited)
   };
 
   const defaultProgress = {
@@ -2048,172 +2028,123 @@ html{-webkit-text-size-adjust:100%;}
     ui.app.hidden = false;
   }
 
+  
   // =========================
-// Voice (SpeechSynthesis)
-// =========================
+  // Voice (SpeechSynthesis)
+  // =========================
 
-/**
- * NOTE (important):
- * Browser TTS voices are provided by the OS / browser, so we can't *guarantee* a specific "person".
- * What we *can* do is:
- * - For EN reads: aggressively prefer voices whose language is en-* (US/UK first) and whose name looks like an English voice,
- *   and avoid Turkish-labelled / Turkish-looking voices.
- * - For TR reads: keep preferring the Turkish voice (often "Tolga") when available.
- */
-// Robust EN/TR TTS:
-// - EN: NEVER fall back to Turkish voice. If no en-* voice exists, show a warning and skip speaking.
-// - TR: can use Turkish voices (often "Tolga").
-// Also handles the common "voices list is empty until voiceschanged" problem.
-function speak(text, lang, _tries = 0) {
-  try {
-    if (!('speechSynthesis' in window)) return;
-    const synth = window.speechSynthesis;
+  // Robust voice loader: on many browsers (especially mobile), voices load asynchronously.
+  const Voice = (() => {
+    let cache = [];
+    let ready = false;
+    let waiters = [];
 
-    const lower = (x) => String(x || '').toLowerCase();
-    const hasTurkishChars = (name) => /[çğıöşüÇĞİÖŞÜ]/.test(String(name || ''));
-
-    const getVoices = () => {
-      try { return (synth.getVoices ? synth.getVoices() : []) || []; } catch { return []; }
-    };
-
-    const voices = getVoices();
-
-    // If voices are not loaded yet, wait a bit and retry (max a few tries)
-    if (!voices.length && _tries < 4) {
-      const retry = () => setTimeout(() => speak(text, lang, _tries + 1), 180);
-      let done = false;
-      const onChanged = () => {
-        if (done) return;
-        done = true;
-        try { synth.removeEventListener('voiceschanged', onChanged); } catch {}
-        retry();
-      };
-      try { synth.addEventListener('voiceschanged', onChanged, { once: true }); } catch {}
-      // Safety timeout (in case voiceschanged never fires)
-      setTimeout(() => {
-        if (done) return;
-        done = true;
-        try { synth.removeEventListener('voiceschanged', onChanged); } catch {}
-        retry();
-      }, 700);
-      return;
+    function readVoices() {
+      try {
+        const v = (window.speechSynthesis && window.speechSynthesis.getVoices) ? window.speechSynthesis.getVoices() : [];
+        cache = Array.isArray(v) ? v : [];
+        if (cache.length) ready = true;
+      } catch {}
+      return cache;
     }
 
-    synth.cancel();
+    function ensureReady(timeoutMs = 800) {
+      return new Promise((resolve) => {
+        readVoices();
+        if (ready) return resolve(cache);
 
-    const u = new SpeechSynthesisUtterance(String(text));
-    u.rate = (lang === 'en')
-      ? Number(settings.enRate || 0.95)
-      : Number(settings.trRate || 0.95);
+        // Some browsers only populate after voiceschanged.
+        const synth = window.speechSynthesis;
+        let done = false;
 
-    const pickMaxScore = (arr, scorer) => {
-      let best = null, bestScore = -1e9;
-      for (const v of arr) {
-        const sc = scorer(v);
-        if (sc > bestScore) { bestScore = sc; best = v; }
+        function finish() {
+          if (done) return;
+          done = true;
+          try { synth && synth.removeEventListener && synth.removeEventListener('voiceschanged', onChanged); } catch {}
+          readVoices();
+          resolve(cache);
+        }
+
+        function onChanged() { finish(); }
+
+        try { synth && synth.addEventListener && synth.addEventListener('voiceschanged', onChanged); } catch {}
+
+        // Kick it a couple times; helps on iOS Safari.
+        try { synth && synth.getVoices && synth.getVoices(); } catch {}
+        const t1 = setTimeout(() => { try { synth && synth.getVoices && synth.getVoices(); } catch {} }, 50);
+        const t2 = setTimeout(() => { try { synth && synth.getVoices && synth.getVoices(); } catch {} }, 200);
+
+        setTimeout(() => {
+          clearTimeout(t1); clearTimeout(t2);
+          finish();
+        }, timeoutMs);
+      });
+    }
+
+    const trNameHints = ['tolga','turkish','türk','turk','tr-tr','tr_tr'];
+
+    function isTurkishVoice(v) {
+      const name = String(v?.name || '').toLowerCase();
+      const lang = String(v?.lang || '').toLowerCase();
+      return lang.startsWith('tr') || trNameHints.some(h => name.includes(h));
+    }
+
+    function pickVoice(targetLang) {
+      const voices = readVoices();
+      const want = String(targetLang || '').toLowerCase();
+
+      // Prefer exact language family first
+      let candidates = voices.filter(v => String(v.lang || '').toLowerCase().startsWith(want));
+
+      // If EN requested, NEVER pick a Turkish voice.
+      if (want.startsWith('en')) {
+        candidates = candidates.filter(v => !isTurkishVoice(v));
+        // If no en-* voice exists, fall back to ANY non-Turkish voice so it won't read with TR voice.
+        if (!candidates.length) {
+          candidates = voices.filter(v => !isTurkishVoice(v));
+        }
       }
-      return best || null;
-    };
 
-    if (lang === 'tr') {
-      u.lang = 'tr-TR';
-      const tr = voices.filter(v => v.lang && lower(v.lang).startsWith('tr'));
-      const tolga = tr.find(v => lower(v.name).includes('tolga'));
-      u.voice = tolga || tr.find(v => v.localService) || tr[0] || null;
+      // For TR, pick tr-* voice only.
+      if (want.startsWith('tr')) {
+        candidates = voices.filter(v => String(v.lang || '').toLowerCase().startsWith('tr'));
+      }
+
+      const pick = (arr) => (arr.find(v => v.localService) || arr[0] || null);
+      return pick(candidates);
+    }
+
+    return { ensureReady, pickVoice };
+  })();
+
+  async function speak(text, lang) {
+    try {
+      if (!('speechSynthesis' in window)) return;
+      const synth = window.speechSynthesis;
+      synth.cancel();
+
+      const isEN = String(lang || 'en').toLowerCase().startsWith('en');
+      const targetLang = isEN ? 'en-US' : 'tr-TR';
+
+      // Ensure voices are loaded (best-effort)
+      await Voice.ensureReady(900);
+
+      const u = new SpeechSynthesisUtterance(String(text));
+      u.lang = targetLang;
+
+      // Rates
+      u.rate = isEN ? Number(settings.enRate || 0.95) : Number(settings.trRate || 0.95);
+
+      // Voice selection
+      const v = Voice.pickVoice(isEN ? 'en' : 'tr');
+      if (v) u.voice = v;
+
       synth.speak(u);
-      return;
+    } catch {
+      // ignore
     }
-
-    // EN
-    u.lang = 'en-US';
-
-    const en = voices.filter(v => v.lang && lower(v.lang).startsWith('en'));
-    const cleanEn = en.filter(v => {
-      const n = lower(v.name);
-      const l = lower(v.lang);
-      if (l.startsWith('tr')) return false;
-      if (n.includes('tolga')) return false;
-      if (n.includes('turkish') || n.includes('türk') || n.includes('turk')) return false;
-      if (hasTurkishChars(v.name)) return false;
-      return true;
-    });
-
-    const preferred = cleanEn.length ? cleanEn : en;
-
-    const scoreEn = (v) => {
-      const n = lower(v.name);
-      const l = lower(v.lang);
-      let score = 0;
-      if (l === 'en-gb') score += 220;
-      else if (l === 'en-us') score += 210;
-      else if (l.startsWith('en-')) score += 180;
-      else if (l.startsWith('en')) score += 160;
-      if (v.localService) score += 35;
-      if (n.includes('google')) score += 25;
-      if (n.includes('microsoft')) score += 25;
-      if (n.includes('samantha') || n.includes('daniel') || n.includes('alex') || n.includes('victoria') || n.includes('kate')) score += 10;
-      return score;
-    };
-
-    const chosen = pickMaxScore(preferred, scoreEn);
-
-    // Critical rule: do NOT speak EN with a Turkish voice.
-    // If there is no en-* voice on the device, stop and warn (user must install an English voice pack).
-    if (!chosen) {
-      openSheet({
-        ok: false,
-        title: 'English ses bulunamadı',
-        sub: 'Cihazında en- (US/UK) ses paketi yok. Bu yüzden EN okuma Türkçe sese düşüyor ve bunu engelliyorum.',
-        answer: '',
-        explain: 'Çözüm: Telefon/PC ayarlarından English (US/UK) TTS voice indir/yükle. Sonra sayfayı yenile.',
-        header: 'warn'
-      });
-      return;
-    }
-
-    u.voice = chosen;
-    synth.speak(u);
-  } catch {
-    // ignore
   }
-}
 
-
-  // Turkish TTS is a "hint" feature: limit usage per browser session (sessionStorage)
-  const TR_HINT_USED_KEY = 'ue_tr_hint_used_v1';
-  function getTrHintUsed() {
-    try { return Number(sessionStorage.getItem(TR_HINT_USED_KEY) || 0) || 0; } catch { return 0; }
-  }
-  function setTrHintUsed(n) {
-    try { sessionStorage.setItem(TR_HINT_USED_KEY, String(Math.max(0, Number(n) || 0))); } catch {}
-  }
-  function getTrHintLimit() {
-    const v = Number(settings.trHintLimit == null ? 5 : settings.trHintLimit);
-    return Number.isFinite(v) ? v : 5;
-  }
-  function updateTrHintUsageUI() {
-    const used = getTrHintUsed();
-    const lim = getTrHintLimit();
-    if (ui.trHintUsage) ui.trHintUsage.textContent = (lim > 0) ? `${used}/${lim}` : `${used}/∞`;
-  }
-  function speakTRHint(text) {
-    const lim = getTrHintLimit();
-    const used = getTrHintUsed();
-    if (lim > 0 && used >= lim) {
-      openSheet({
-        ok: false,
-        title: 'TR okuma hakkı doldu',
-        sub: `Bu session için Türkçe okuma limiti: ${lim}.`,
-        answer: '',
-        explain: 'Ayarlar > TR Okuma Hakkı (İpucu) bölümünden artırabilir veya sınırsız yapabilirsin.',
-        header: 'warn'
-      });
-      return;
-    }
-    setTrHintUsed(used + 1);
-    updateTrHintUsageUI();
-    speak(text, 'tr');
-  }
 
   // =========================
   // Sound FX (tiny, offline)
@@ -3825,7 +3756,7 @@ function speak(text, lang, _tries = 0) {
     });
 
     ui.btnTPSpeakEN.onclick = () => speak(q.word, 'en');
-    ui.btnTPSpeakTR.onclick = () => speakTRHint((q.correctAnswers && q.correctAnswers[0]) ? q.correctAnswers[0] : q.tr);
+    ui.btnTPSpeakTR.onclick = () => speak((q.correctAnswers && q.correctAnswers[0]) ? q.correctAnswers[0] : q.tr, 'tr');
   }
 
   // =========================
@@ -3876,8 +3807,6 @@ function speak(text, lang, _tries = 0) {
     ui.trRate.value = String(settings.trRate || 0.95);
     ui.autoSpeakFirstN.value = String(settings.autoSpeakFirstN == null ? 3 : settings.autoSpeakFirstN);
     ui.maxHearts.value = String(settings.maxHearts == null ? 5 : settings.maxHearts);
-    ui.trHintLimit.value = String(settings.trHintLimit == null ? 5 : settings.trHintLimit);
-    updateTrHintUsageUI();
   }
 
   function closeSettings() {
@@ -3948,8 +3877,6 @@ function speak(text, lang, _tries = 0) {
       settings.trRate = Number(ui.trRate.value || 0.95);
       settings.autoSpeakFirstN = Number(ui.autoSpeakFirstN.value || 3);
       settings.maxHearts = Number(ui.maxHearts.value || 5);
-      settings.trHintLimit = Number(ui.trHintLimit.value == null ? 5 : ui.trHintLimit.value);
-      updateTrHintUsageUI();
 
       applyTheme(settings.theme);
       // also adjust hearts max
@@ -4086,7 +4013,7 @@ function speak(text, lang, _tries = 0) {
 
     // lesson actions
     ui.btnSpeakEN.addEventListener('click', () => speak(currentQ().speakEN || currentQ().word, 'en'));
-    ui.btnSpeakTR.addEventListener('click', () => speakTRHint(currentQ().speakTR || currentQ().tr));
+    ui.btnSpeakTR.addEventListener('click', () => speak(currentQ().speakTR || currentQ().tr, 'tr'));
     ui.btnHint.addEventListener('click', () => {
       const q = currentQ();
       const payload = buildHintPayload(q);
@@ -4274,7 +4201,6 @@ function speak(text, lang, _tries = 0) {
 
     // events
     wireEvents();
-    updateTrHintUsageUI();
 
     // Service worker
     registerSW();
