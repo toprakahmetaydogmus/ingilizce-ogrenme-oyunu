@@ -1326,7 +1326,24 @@ html{-webkit-text-size-adjust:100%;}
             </div>
 
 
+            
+
             <div class="row between wrap mt12">
+              <div>
+                <div class="label">TR Okuma Hakkı (İpucu)</div>
+                <div class="muted small">Türkçe okuma bir ipucu sayılır. Bu sekmede (session) kaç kez kullanabileceğini sınırla.</div>
+                <div class="muted small">Bu session: <span id="trHintUsage">0</span></div>
+              </div>
+              <select class="input input--sm" id="trHintLimit">
+                <option value="0">Sınırsız</option>
+                <option value="3">3</option>
+                <option value="5" selected>5 (varsayılan)</option>
+                <option value="10">10</option>
+                <option value="20">20</option>
+              </select>
+            </div>
+
+<div class="row between wrap mt12">
               <div>
                 <div class="label">Can (Hearts)</div>
                 <div class="muted small">Yanlışta azalır (Pratikte azalmaz)</div>
@@ -1592,6 +1609,8 @@ html{-webkit-text-size-adjust:100%;}
     trRate: $('#trRate'),
     autoSpeakFirstN: $('#autoSpeakFirstN'),
     maxHearts: $('#maxHearts'),
+    trHintLimit: $('#trHintLimit'),
+    trHintUsage: $('#trHintUsage'),
     btnSaveSettings: $('#btnSaveSettings'),
     btnResetProgress: $('#btnResetProgress'),
     btnRefreshDict: $('#btnRefreshDict'),
@@ -1942,6 +1961,7 @@ html{-webkit-text-size-adjust:100%;}
     trRate: 0.95,
     autoSpeakFirstN: 3,
     maxHearts: 5,
+    trHintLimit: 5, // Turkish TTS is a hint; limit per session (0=unlimited)
   };
 
   const defaultProgress = {
@@ -2038,25 +2058,72 @@ function speak(text, lang) {
       const synth = window.speechSynthesis;
       synth.cancel();
 
-      const u = new SpeechSynthesisUtterance(String(text));
+      const targetLang = (lang === 'tr') ? 'tr-TR' : 'en-US';
 
-      // Always use English voice (requested)
-      u.lang = 'en-US';
+      const u = new SpeechSynthesisUtterance(String(text));
+      u.lang = targetLang;
       u.rate = (lang === 'en') ? Number(settings.enRate || 0.95) : Number(settings.trRate || 0.95);
 
-      const voices = synth.getVoices ? synth.getVoices() : [];
-      const en = (voices || []).filter(v => v.lang && String(v.lang).toLowerCase().startsWith('en'));
-      // Prefer localService voice if available (often better offline)
-      const pick = (arr) => (arr.find(v => v.localService) || arr[0]);
-      if (en.length) u.voice = pick(en);
+      const voices = (synth.getVoices ? synth.getVoices() : []) || [];
+      const lower = (s) => String(s || '').toLowerCase();
 
-      // If voices are not ready yet (common on iOS), speak anyway; the browser will choose a default en voice.
+      const pickBest = (arr) => (arr.find(v => v.localService) || arr[0] || null);
+
+      if (lang === 'tr') {
+        const tr = voices.filter(v => v.lang && lower(v.lang).startsWith('tr'));
+        // Some platforms have a Turkish male voice named "Tolga" — prefer it when available.
+        const tolga = tr.find(v => lower(v.name).includes('tolga'));
+        u.voice = tolga || pickBest(tr);
+      } else {
+        const en = voices.filter(v => v.lang && lower(v.lang).startsWith('en'));
+        // Avoid accidentally picking Turkish voices even if the browser mislabels.
+        const cleanEn = en.filter(v => !lower(v.name).includes('tolga') && !lower(v.lang).startsWith('tr'));
+        u.voice = pickBest(cleanEn.length ? cleanEn : en);
+      }
+
+      // If voices are not ready yet (common on iOS), speak anyway; the browser will choose a default matching voice.
       synth.speak(u);
     } catch {
       // ignore
     }
   }
 
+
+  // Turkish TTS is a "hint" feature: limit usage per browser session (sessionStorage)
+  const TR_HINT_USED_KEY = 'ue_tr_hint_used_v1';
+  function getTrHintUsed() {
+    try { return Number(sessionStorage.getItem(TR_HINT_USED_KEY) || 0) || 0; } catch { return 0; }
+  }
+  function setTrHintUsed(n) {
+    try { sessionStorage.setItem(TR_HINT_USED_KEY, String(Math.max(0, Number(n) || 0))); } catch {}
+  }
+  function getTrHintLimit() {
+    const v = Number(settings.trHintLimit == null ? 5 : settings.trHintLimit);
+    return Number.isFinite(v) ? v : 5;
+  }
+  function updateTrHintUsageUI() {
+    const used = getTrHintUsed();
+    const lim = getTrHintLimit();
+    if (ui.trHintUsage) ui.trHintUsage.textContent = (lim > 0) ? `${used}/${lim}` : `${used}/∞`;
+  }
+  function speakTRHint(text) {
+    const lim = getTrHintLimit();
+    const used = getTrHintUsed();
+    if (lim > 0 && used >= lim) {
+      openSheet({
+        ok: false,
+        title: 'TR okuma hakkı doldu',
+        sub: `Bu session için Türkçe okuma limiti: ${lim}.`,
+        answer: '',
+        explain: 'Ayarlar > TR Okuma Hakkı (İpucu) bölümünden artırabilir veya sınırsız yapabilirsin.',
+        header: 'warn'
+      });
+      return;
+    }
+    setTrHintUsed(used + 1);
+    updateTrHintUsageUI();
+    speak(text, 'tr');
+  }
 
   // =========================
   // Sound FX (tiny, offline)
@@ -3668,7 +3735,7 @@ function speak(text, lang) {
     });
 
     ui.btnTPSpeakEN.onclick = () => speak(q.word, 'en');
-    ui.btnTPSpeakTR.onclick = () => speak((q.correctAnswers && q.correctAnswers[0]) ? q.correctAnswers[0] : q.tr, 'tr');
+    ui.btnTPSpeakTR.onclick = () => speakTRHint((q.correctAnswers && q.correctAnswers[0]) ? q.correctAnswers[0] : q.tr);
   }
 
   // =========================
@@ -3719,6 +3786,8 @@ function speak(text, lang) {
     ui.trRate.value = String(settings.trRate || 0.95);
     ui.autoSpeakFirstN.value = String(settings.autoSpeakFirstN == null ? 3 : settings.autoSpeakFirstN);
     ui.maxHearts.value = String(settings.maxHearts == null ? 5 : settings.maxHearts);
+    ui.trHintLimit.value = String(settings.trHintLimit == null ? 5 : settings.trHintLimit);
+    updateTrHintUsageUI();
   }
 
   function closeSettings() {
@@ -3789,6 +3858,8 @@ function speak(text, lang) {
       settings.trRate = Number(ui.trRate.value || 0.95);
       settings.autoSpeakFirstN = Number(ui.autoSpeakFirstN.value || 3);
       settings.maxHearts = Number(ui.maxHearts.value || 5);
+      settings.trHintLimit = Number(ui.trHintLimit.value == null ? 5 : ui.trHintLimit.value);
+      updateTrHintUsageUI();
 
       applyTheme(settings.theme);
       // also adjust hearts max
@@ -3925,7 +3996,7 @@ function speak(text, lang) {
 
     // lesson actions
     ui.btnSpeakEN.addEventListener('click', () => speak(currentQ().speakEN || currentQ().word, 'en'));
-    ui.btnSpeakTR.addEventListener('click', () => speak(currentQ().speakTR || currentQ().tr, 'tr'));
+    ui.btnSpeakTR.addEventListener('click', () => speakTRHint(currentQ().speakTR || currentQ().tr));
     ui.btnHint.addEventListener('click', () => {
       const q = currentQ();
       const payload = buildHintPayload(q);
@@ -4113,6 +4184,7 @@ function speak(text, lang) {
 
     // events
     wireEvents();
+    updateTrHintUsageUI();
 
     // Service worker
     registerSW();
@@ -4154,4 +4226,4 @@ function speak(text, lang) {
 </script>
 </body>
 </html>
-//UPDATEFINALTOPRAKAHMETAYDOGMUS
+//hopp.bio/siberegitim
