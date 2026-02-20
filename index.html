@@ -1695,8 +1695,8 @@ html[data-theme="dark"] kbd{background: rgba(255,255,255,.08); border-color: rgb
     if (!lesson || !ui.viewLesson.classList.contains('view--active')) return;
 
     clearTimeout(autoContinueTimer);
-    const base = 850;
-    const delay = ok ? base : base + 350;
+    const base = 7000;
+    const delay = ok ? base : base + 7000;
 
     autoContinueTimer = setTimeout(() => {
       // If feedback sheet open, press continue
