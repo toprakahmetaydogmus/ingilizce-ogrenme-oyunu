@@ -695,7 +695,9 @@ html[data-theme="dark"] kbd{background: rgba(255,255,255,.08); border-color: rgb
 .sheet__body{padding: 14px 16px}
 .sheet__answer{font-weight: 1000}
 .sheet__explain{margin-top:8px; color: var(--muted); font-weight:700; line-height:1.45}
-.sheet__footer{padding: 12px 16px; background: var(--card2)}
+.sheet__footer{padding: 12px 16px; background: var(--card2); display:flex; gap:10px; align-items:center}
+.sheet__footer .btn{flex:1}
+@media (max-width: 420px){.sheet__footer{flex-direction:column}.sheet__footer .btn{width:100%}}
 
 
 /* Fatal overlay (shows on old/unsupported mobile browsers) */
@@ -718,6 +720,30 @@ html[data-theme="dark"] kbd{background: rgba(255,255,255,.08); border-color: rgb
 .fatal p{margin:0 0 10px; color:#334155}
 .fatal code{display:block; white-space:pre-wrap; word-break:break-word; background:#0b1020; color:#e5e7eb; padding:12px; border-radius:12px; font-size:.85rem}
 .fatal .btn{width:100%}
+
+
+/* ===== Mobile & visibility patch (v11) ===== */
+body{background-color:#111827;} /* fallback */
+.card,.panel,.sheet__panel,.prompt,.answerbtn,.table{color:var(--text);}
+.answerbtn__text,.prompt__text,#promptText{color:var(--text);}
+.muted{color:var(--muted);}
+
+@media (max-width: 560px){
+  .topbar{flex-wrap:wrap; gap:10px;}
+  .brand__logo{width:40px;height:40px;border-radius:14px}
+  .brand__title{font-size:1.02rem}
+  .pill{padding:9px 10px}
+  .grid3{grid-template-columns:1fr; }
+  .bigbtn{min-height:72px}
+  .prompt__text{font-size:1.35rem}
+  .table{min-width:0}
+  .table th,.table td{font-size:.88rem;padding:10px 8px}
+  .progressring{width:88px;height:88px;margin:0 auto}
+}
+/* ensure progress ring text is centered on all browsers */
+.progressring__text{line-height:1; text-align:center;}
+/* prevent iOS text auto zoom issues */
+html{-webkit-text-size-adjust:100%;}
 
 </style>
 </head>
@@ -1344,7 +1370,8 @@ html[data-theme="dark"] kbd{background: rgba(255,255,255,.08); border-color: rgb
           </div>
 
           <div class="sheet__footer">
-            <button class="btn btn--primary btn--wide" id="btnContinue">Devam</button>
+            <button class="btn btn--ghost" id="btnExplain" type="button">Doğru cevabı açıkla</button>
+            <button class="btn btn--primary" id="btnContinue" type="button">Diğer Soru</button>
           </div>
         </div>
         <div class="sheet__backdrop" id="sheetBackdrop" aria-hidden="true"></div>
@@ -1576,6 +1603,7 @@ html[data-theme="dark"] kbd{background: rgba(255,255,255,.08); border-color: rgb
     sheetSub: $('#sheetSub'),
     sheetAnswer: $('#sheetAnswer'),
     sheetExplain: $('#sheetExplain'),
+    btnExplain: $('#btnExplain'),
     btnContinue: $('#btnContinue'),
     sheetBackdrop: $('#sheetBackdrop'),
 
@@ -1688,26 +1716,8 @@ html[data-theme="dark"] kbd{background: rgba(255,255,255,.08); border-color: rgb
     return { burst };
   })();
 
-  // Auto-advance after feedback so you never get stuck
-  let autoContinueTimer = 0;
-  function scheduleAutoContinue(ok) {
-    // Only auto-advance inside lesson view
-    if (!lesson || !ui.viewLesson.classList.contains('view--active')) return;
-
-    clearTimeout(autoContinueTimer);
-    const base = 1500;
-    const delay = ok ? base : base + 700;
-
-    autoContinueTimer = setTimeout(() => {
-      // If feedback sheet open, press continue
-      if (ui.sheet.getAttribute('aria-hidden') === 'false') {
-        if (ui.btnContinue) ui.btnContinue.click();
-      } else {
-        // fallback
-        nextQuestionOrEnd();
-      }
-    }, delay);
-  }
+  // Auto-advance is disabled by design: user must tap buttons on the bottom sheet.
+  function scheduleAutoContinue(){ /* disabled */ }
 
 
   // =========================
@@ -2021,27 +2031,32 @@ html[data-theme="dark"] kbd{background: rgba(255,255,255,.08); border-color: rgb
   // =========================
   // Voice (SpeechSynthesis)
   // =========================
-  function speak(text, lang) {
+  
+function speak(text, lang) {
     try {
       if (!('speechSynthesis' in window)) return;
-      window.speechSynthesis.cancel();
+      const synth = window.speechSynthesis;
+      synth.cancel();
+
       const u = new SpeechSynthesisUtterance(String(text));
-      if (lang === 'en') {
-        u.lang = 'en-US';
-        u.rate = Number(settings.enRate || 0.95);
-        const voices = window.speechSynthesis.getVoices().filter(v => v.lang && v.lang.startsWith('en'));
-        if (voices.length) u.voice = voices[0];
-      } else {
-        u.lang = 'tr-TR';
-        u.rate = Number(settings.trRate || 0.95);
-        const voices = window.speechSynthesis.getVoices().filter(v => v.lang && v.lang.startsWith('tr'));
-        if (voices.length) u.voice = voices[0];
-      }
-      window.speechSynthesis.speak(u);
+
+      // Always use English voice (requested)
+      u.lang = 'en-US';
+      u.rate = (lang === 'en') ? Number(settings.enRate || 0.95) : Number(settings.trRate || 0.95);
+
+      const voices = synth.getVoices ? synth.getVoices() : [];
+      const en = (voices || []).filter(v => v.lang && String(v.lang).toLowerCase().startsWith('en'));
+      // Prefer localService voice if available (often better offline)
+      const pick = (arr) => (arr.find(v => v.localService) || arr[0]);
+      if (en.length) u.voice = pick(en);
+
+      // If voices are not ready yet (common on iOS), speak anyway; the browser will choose a default en voice.
+      synth.speak(u);
     } catch {
       // ignore
     }
   }
+
 
   // =========================
   // Sound FX (tiny, offline)
@@ -2974,15 +2989,14 @@ html[data-theme="dark"] kbd{background: rgba(255,255,255,.08); border-color: rgb
       sub: ok ? `+${q.xp} XP` : 'Bir sonraki soruda toparlayalım 💪',
       answer: ok ? `✅ ${correctText}` : `✅ Doğru: ${correctText}`,
       explain,
-      header: ok ? 'ok' : 'bad'
+      header: ok ? 'ok' : 'bad',
+      action: 'next'
     });
 
-    // Confetti for correct answers + auto-advance
+    // Confetti for correct answers (manual continue)
     if (ok) confetti.burst();
-    scheduleAutoContinue(ok);
-
-
-    // if hearts depleted: end lesson early
+    // Not auto-advancing: user taps “Diğer Soru” on the bottom sheet.
+// if hearts depleted: end lesson early
     if (lesson.mode !== 'practice' && getHeartsMax() < 999 && ((progress.hearts == null ? 0 : progress.hearts) <= 0)) {
       ui.sheetExplain.textContent += ' • ❤️ Canların bitti. Ders bitti.';
       // On continue will end.
@@ -3183,7 +3197,34 @@ html[data-theme="dark"] kbd{background: rgba(255,255,255,.08); border-color: rgb
   // =========================
   // Sheet UI
   // =========================
-  function openSheet({ ok, title, sub, answer, explain, header }){
+  let sheetAction = 'close'; // 'close' | 'next'
+  let sheetExplainOpen = false;
+
+  function setSheetExplain(open){
+    sheetExplainOpen = !!open;
+    const has = (ui.sheetExplain.textContent || '').trim().length > 0;
+
+    if (!has){
+      ui.sheetExplain.hidden = true;
+      if (ui.btnExplain) ui.btnExplain.hidden = true;
+      return;
+    }
+
+    if (sheetAction === 'next'){
+      // Answer feedback: explain collapsed by default, user can expand
+      if (ui.btnExplain) ui.btnExplain.hidden = false;
+      ui.sheetExplain.hidden = !sheetExplainOpen;
+      if (ui.btnExplain) ui.btnExplain.textContent = sheetExplainOpen ? 'Açıklamayı gizle' : 'Doğru cevabı açıkla';
+    } else {
+      // Info / warn sheets: always show explain, no toggle button
+      if (ui.btnExplain) ui.btnExplain.hidden = true;
+      ui.sheetExplain.hidden = false;
+    }
+  }
+
+  function openSheet({ ok, title, sub, answer, explain, header, action }){
+    sheetAction = action || 'close';
+
     ui.sheetTitle.textContent = title || '';
     ui.sheetSub.textContent = sub || '';
     ui.sheetAnswer.textContent = answer || '';
@@ -3193,16 +3234,25 @@ html[data-theme="dark"] kbd{background: rgba(255,255,255,.08); border-color: rgb
 
     if (header === 'ok') ui.sheetHeader.style.background = 'var(--green)';
     else if (header === 'bad') ui.sheetHeader.style.background = 'var(--danger)';
+    else if (header === 'warn') ui.sheetHeader.style.background = 'var(--orange)';
     else ui.sheetHeader.style.background = 'var(--primary)';
 
-    // Button label depends on context
-    ui.btnContinue.textContent = (ui.viewLesson.classList.contains('view--active') || ui.viewTwoPlayerGame.classList.contains('view--active')) ? 'Devam' : 'Kapat';
+    // Button label depends on action/context
+    if (tp && tp.done) ui.btnContinue.textContent = 'Ana Menü';
+    else if (sheetAction === 'next') ui.btnContinue.textContent = 'Diğer Soru';
+    else ui.btnContinue.textContent = 'Kapat';
+
+    // Reset explain state every open
+    sheetExplainOpen = false;
+    setSheetExplain(false);
 
     ui.sheet.setAttribute('aria-hidden', 'false');
   }
 
   function closeSheet(){
     ui.sheet.setAttribute('aria-hidden', 'true');
+    sheetAction = 'close';
+    sheetExplainOpen = false;
   }
 
   // =========================
@@ -3961,7 +4011,14 @@ html[data-theme="dark"] kbd{background: rgba(255,255,255,.08); border-color: rgb
     });
 
     // sheet
+    if (ui.btnExplain) {
+      ui.btnExplain.addEventListener('click', () => {
+        setSheetExplain(!sheetExplainOpen);
+      });
+    }
+
     ui.btnContinue.addEventListener('click', () => {
+      const act = sheetAction; // capture before closeSheet() resets
       closeSheet();
 
       // If two-player ended
@@ -3971,12 +4028,16 @@ html[data-theme="dark"] kbd{background: rgba(255,255,255,.08); border-color: rgb
         return;
       }
 
-      // If answer just happened, continue
-      if (lesson && ui.viewLesson.classList.contains('view--active')) {
+      // Only advance when this sheet was opened as answer feedback
+      if (act === 'next' && lesson && ui.viewLesson.classList.contains('view--active')) {
         nextQuestionOrEnd();
       }
     });
-    ui.sheetBackdrop.addEventListener('click', closeSheet);
+    ui.sheetBackdrop.addEventListener('click', () => {
+      // Prevent accidental close/advance on answer feedback.
+      // Only allow backdrop-close for non-feedback sheets (warnings, settings, etc.).
+      if (sheetAction !== 'next') closeSheet();
+    });
 
     // two player exit
     ui.btnTPExit.addEventListener('click', () => {
@@ -4063,7 +4124,7 @@ html[data-theme="dark"] kbd{background: rgba(255,255,255,.08); border-color: rgb
 
   function registerSW() {
     if (!('serviceWorker' in navigator)) return;
-    navigator.serviceWorker.register('./sw.js').catch(() => {});
+    navigator.serviceWorker.register('./sw.js?v=11').catch(() => {});
   }
 
   function escapeHTML(s) {
