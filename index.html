@@ -2049,44 +2049,134 @@ html{-webkit-text-size-adjust:100%;}
   }
 
   // =========================
-  // Voice (SpeechSynthesis)
-  // =========================
-  
-function speak(text, lang) {
-    try {
-      if (!('speechSynthesis' in window)) return;
-      const synth = window.speechSynthesis;
-      synth.cancel();
+// Voice (SpeechSynthesis)
+// =========================
 
-      const targetLang = (lang === 'tr') ? 'tr-TR' : 'en-US';
+/**
+ * NOTE (important):
+ * Browser TTS voices are provided by the OS / browser, so we can't *guarantee* a specific "person".
+ * What we *can* do is:
+ * - For EN reads: aggressively prefer voices whose language is en-* (US/UK first) and whose name looks like an English voice,
+ *   and avoid Turkish-labelled / Turkish-looking voices.
+ * - For TR reads: keep preferring the Turkish voice (often "Tolga") when available.
+ */
+// Robust EN/TR TTS:
+// - EN: NEVER fall back to Turkish voice. If no en-* voice exists, show a warning and skip speaking.
+// - TR: can use Turkish voices (often "Tolga").
+// Also handles the common "voices list is empty until voiceschanged" problem.
+function speak(text, lang, _tries = 0) {
+  try {
+    if (!('speechSynthesis' in window)) return;
+    const synth = window.speechSynthesis;
 
-      const u = new SpeechSynthesisUtterance(String(text));
-      u.lang = targetLang;
-      u.rate = (lang === 'en') ? Number(settings.enRate || 0.95) : Number(settings.trRate || 0.95);
+    const lower = (x) => String(x || '').toLowerCase();
+    const hasTurkishChars = (name) => /[çğıöşüÇĞİÖŞÜ]/.test(String(name || ''));
 
-      const voices = (synth.getVoices ? synth.getVoices() : []) || [];
-      const lower = (s) => String(s || '').toLowerCase();
+    const getVoices = () => {
+      try { return (synth.getVoices ? synth.getVoices() : []) || []; } catch { return []; }
+    };
 
-      const pickBest = (arr) => (arr.find(v => v.localService) || arr[0] || null);
+    const voices = getVoices();
 
-      if (lang === 'tr') {
-        const tr = voices.filter(v => v.lang && lower(v.lang).startsWith('tr'));
-        // Some platforms have a Turkish male voice named "Tolga" — prefer it when available.
-        const tolga = tr.find(v => lower(v.name).includes('tolga'));
-        u.voice = tolga || pickBest(tr);
-      } else {
-        const en = voices.filter(v => v.lang && lower(v.lang).startsWith('en'));
-        // Avoid accidentally picking Turkish voices even if the browser mislabels.
-        const cleanEn = en.filter(v => !lower(v.name).includes('tolga') && !lower(v.lang).startsWith('tr'));
-        u.voice = pickBest(cleanEn.length ? cleanEn : en);
-      }
-
-      // If voices are not ready yet (common on iOS), speak anyway; the browser will choose a default matching voice.
-      synth.speak(u);
-    } catch {
-      // ignore
+    // If voices are not loaded yet, wait a bit and retry (max a few tries)
+    if (!voices.length && _tries < 4) {
+      const retry = () => setTimeout(() => speak(text, lang, _tries + 1), 180);
+      let done = false;
+      const onChanged = () => {
+        if (done) return;
+        done = true;
+        try { synth.removeEventListener('voiceschanged', onChanged); } catch {}
+        retry();
+      };
+      try { synth.addEventListener('voiceschanged', onChanged, { once: true }); } catch {}
+      // Safety timeout (in case voiceschanged never fires)
+      setTimeout(() => {
+        if (done) return;
+        done = true;
+        try { synth.removeEventListener('voiceschanged', onChanged); } catch {}
+        retry();
+      }, 700);
+      return;
     }
+
+    synth.cancel();
+
+    const u = new SpeechSynthesisUtterance(String(text));
+    u.rate = (lang === 'en')
+      ? Number(settings.enRate || 0.95)
+      : Number(settings.trRate || 0.95);
+
+    const pickMaxScore = (arr, scorer) => {
+      let best = null, bestScore = -1e9;
+      for (const v of arr) {
+        const sc = scorer(v);
+        if (sc > bestScore) { bestScore = sc; best = v; }
+      }
+      return best || null;
+    };
+
+    if (lang === 'tr') {
+      u.lang = 'tr-TR';
+      const tr = voices.filter(v => v.lang && lower(v.lang).startsWith('tr'));
+      const tolga = tr.find(v => lower(v.name).includes('tolga'));
+      u.voice = tolga || tr.find(v => v.localService) || tr[0] || null;
+      synth.speak(u);
+      return;
+    }
+
+    // EN
+    u.lang = 'en-US';
+
+    const en = voices.filter(v => v.lang && lower(v.lang).startsWith('en'));
+    const cleanEn = en.filter(v => {
+      const n = lower(v.name);
+      const l = lower(v.lang);
+      if (l.startsWith('tr')) return false;
+      if (n.includes('tolga')) return false;
+      if (n.includes('turkish') || n.includes('türk') || n.includes('turk')) return false;
+      if (hasTurkishChars(v.name)) return false;
+      return true;
+    });
+
+    const preferred = cleanEn.length ? cleanEn : en;
+
+    const scoreEn = (v) => {
+      const n = lower(v.name);
+      const l = lower(v.lang);
+      let score = 0;
+      if (l === 'en-gb') score += 220;
+      else if (l === 'en-us') score += 210;
+      else if (l.startsWith('en-')) score += 180;
+      else if (l.startsWith('en')) score += 160;
+      if (v.localService) score += 35;
+      if (n.includes('google')) score += 25;
+      if (n.includes('microsoft')) score += 25;
+      if (n.includes('samantha') || n.includes('daniel') || n.includes('alex') || n.includes('victoria') || n.includes('kate')) score += 10;
+      return score;
+    };
+
+    const chosen = pickMaxScore(preferred, scoreEn);
+
+    // Critical rule: do NOT speak EN with a Turkish voice.
+    // If there is no en-* voice on the device, stop and warn (user must install an English voice pack).
+    if (!chosen) {
+      openSheet({
+        ok: false,
+        title: 'English ses bulunamadı',
+        sub: 'Cihazında en- (US/UK) ses paketi yok. Bu yüzden EN okuma Türkçe sese düşüyor ve bunu engelliyorum.',
+        answer: '',
+        explain: 'Çözüm: Telefon/PC ayarlarından English (US/UK) TTS voice indir/yükle. Sonra sayfayı yenile.',
+        header: 'warn'
+      });
+      return;
+    }
+
+    u.voice = chosen;
+    synth.speak(u);
+  } catch {
+    // ignore
   }
+}
 
 
   // Turkish TTS is a "hint" feature: limit usage per browser session (sessionStorage)
@@ -4226,4 +4316,4 @@ function speak(text, lang) {
 </script>
 </body>
 </html>
-//hopp.bio/siberegitim
+//UPDATEFINALTOPRAKAHMETAYDOGMUS
