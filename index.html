@@ -2028,126 +2028,108 @@ html{-webkit-text-size-adjust:100%;}
     ui.app.hidden = false;
   }
 
-  
   // =========================
   // Voice (SpeechSynthesis)
   // =========================
 
-  // Robust voice loader: on many browsers (especially mobile), voices load asynchronously.
-  const Voice = (() => {
-    let cache = [];
+  // NOTE:
+  // - Web Speech API voices come from the device/OS. We cannot "bundle" an English voice inside Vercel/index.html.
+  // - What we *can* do: reliably wait for voices to load, pick the best English voice, and never accidentally choose a Turkish voice for EN.
+
+  const TTS = (() => {
+    const synth = ('speechSynthesis' in window) ? window.speechSynthesis : null;
+    let voices = [];
     let ready = false;
-    let waiters = [];
 
-    function readVoices() {
+    const badNameRe = /(tolga|turkish|t[üu]rk|tr-?tr)/i;
+
+    function refreshVoices() {
       try {
-        const v = (window.speechSynthesis && window.speechSynthesis.getVoices) ? window.speechSynthesis.getVoices() : [];
-        cache = Array.isArray(v) ? v : [];
-        if (cache.length) ready = true;
+        voices = synth?.getVoices?.() || [];
+        ready = voices.length > 0;
+      } catch {
+        voices = [];
+        ready = false;
+      }
+      return voices;
+    }
+
+    // Populate as soon as possible (some browsers load voices async)
+    function init() {
+      if (!synth) return;
+      refreshVoices();
+      // voiceschanged is the canonical way to know when voices are available
+      synth.addEventListener?.('voiceschanged', refreshVoices);
+
+      // Also do a couple of delayed refreshes (Safari/iOS sometimes misses early calls)
+      setTimeout(refreshVoices, 150);
+      setTimeout(refreshVoices, 600);
+      setTimeout(refreshVoices, 1200);
+    }
+
+    function pickVoice(targetLang /* 'en' | 'tr' */) {
+      const vs = voices || [];
+      if (!vs.length) return null;
+
+      const norm = (s) => String(s || '').toLowerCase();
+      const starts = (v, p) => norm(v.lang).startsWith(p);
+
+      if (targetLang === 'tr') {
+        const tr = vs.filter(v => starts(v, 'tr'));
+        return tr.find(v => v.localService) || tr[0] || null;
+      }
+
+      // EN:
+      // 1) prefer en-*
+      // 2) otherwise pick any non-TR voice (to avoid "TRAYİN" with a TR voice)
+      // 3) never pick voices with names that look Turkish (Tolga/Turkish/etc.)
+      const en = vs.filter(v => starts(v, 'en') && !badNameRe.test(norm(v.name)));
+      if (en.length) return en.find(v => v.localService) || en[0];
+
+      const nonTr = vs.filter(v => !starts(v, 'tr') && !badNameRe.test(norm(v.name)));
+      return (nonTr.find(v => v.localService) || nonTr[0] || null);
+    }
+
+    function speak(text, lang /* 'en' | 'tr' */) {
+      if (!synth) return;
+      const t = String(text ?? '').trim();
+      if (!t) return;
+
+      // iOS/Safari: speaking can freeze if cancel() is spammed. So only cancel when needed.
+      try {
+        if (synth.speaking || synth.pending) synth.cancel();
       } catch {}
-      return cache;
-    }
 
-    function ensureReady(timeoutMs = 800) {
-      return new Promise((resolve) => {
-        readVoices();
-        if (ready) return resolve(cache);
+      const u = new SpeechSynthesisUtterance(t);
+      const isTR = (lang === 'tr');
+      u.lang = isTR ? 'tr-TR' : 'en-US';
 
-        // Some browsers only populate after voiceschanged.
-        const synth = window.speechSynthesis;
-        let done = false;
+      // Rates from settings (fallbacks are safe defaults)
+      const rEn = Number(settings?.enRate ?? 0.95);
+      const rTr = Number(settings?.trRate ?? 0.95);
+      u.rate = isTR ? rTr : rEn;
 
-        function finish() {
-          if (done) return;
-          done = true;
-          try { synth && synth.removeEventListener && synth.removeEventListener('voiceschanged', onChanged); } catch {}
-          readVoices();
-          resolve(cache);
-        }
-
-        function onChanged() { finish(); }
-
-        try { synth && synth.addEventListener && synth.addEventListener('voiceschanged', onChanged); } catch {}
-
-        // Kick it a couple times; helps on iOS Safari.
-        try { synth && synth.getVoices && synth.getVoices(); } catch {}
-        const t1 = setTimeout(() => { try { synth && synth.getVoices && synth.getVoices(); } catch {} }, 50);
-        const t2 = setTimeout(() => { try { synth && synth.getVoices && synth.getVoices(); } catch {} }, 200);
-
-        setTimeout(() => {
-          clearTimeout(t1); clearTimeout(t2);
-          finish();
-        }, timeoutMs);
-      });
-    }
-
-    const trNameHints = ['tolga','turkish','türk','turk','tr-tr','tr_tr'];
-
-    function isTurkishVoice(v) {
-      const name = String(v?.name || '').toLowerCase();
-      const lang = String(v?.lang || '').toLowerCase();
-      return lang.startsWith('tr') || trNameHints.some(h => name.includes(h));
-    }
-
-    function pickVoice(targetLang) {
-      const voices = readVoices();
-      const want = String(targetLang || '').toLowerCase();
-
-      // Prefer exact language family first
-      let candidates = voices.filter(v => String(v.lang || '').toLowerCase().startsWith(want));
-
-      // If EN requested, NEVER pick a Turkish voice.
-      if (want.startsWith('en')) {
-        candidates = candidates.filter(v => !isTurkishVoice(v));
-        // If no en-* voice exists, fall back to ANY non-Turkish voice so it won't read with TR voice.
-        if (!candidates.length) {
-          candidates = voices.filter(v => !isTurkishVoice(v));
-        }
-      }
-
-      // For TR, pick tr-* voice only.
-      if (want.startsWith('tr')) {
-        candidates = voices.filter(v => String(v.lang || '').toLowerCase().startsWith('tr'));
-      }
-
-      const pick = (arr) => (arr.find(v => v.localService) || arr[0] || null);
-      return pick(candidates);
-    }
-
-    return { ensureReady, pickVoice };
-  })();
-
-  async function speak(text, lang) {
-    try {
-      if (!('speechSynthesis' in window)) return;
-      const synth = window.speechSynthesis;
-      synth.cancel();
-
-      const isEN = String(lang || 'en').toLowerCase().startsWith('en');
-      const targetLang = isEN ? 'en-US' : 'tr-TR';
-
-      // Ensure voices are loaded (best-effort)
-      await Voice.ensureReady(900);
-
-      const u = new SpeechSynthesisUtterance(String(text));
-      u.lang = targetLang;
-
-      // Rates
-      u.rate = isEN ? Number(settings.enRate || 0.95) : Number(settings.trRate || 0.95);
-
-      // Voice selection
-      const v = Voice.pickVoice(isEN ? 'en' : 'tr');
+      // Use cached voices (fast); refresh once if not ready yet.
+      if (!ready) refreshVoices();
+      const v = pickVoice(isTR ? 'tr' : 'en');
       if (v) u.voice = v;
 
-      synth.speak(u);
-    } catch {
-      // ignore
+      // Fire
+      try { synth.speak(u); } catch {}
     }
-  }
+
+    return { init, speak, refreshVoices };
+  })();
+
+  // Initialize TTS once UI is ready
+  try { TTS.init(); } catch {}
+
+  // Keep existing callers working
+  function speak(text, lang) { TTS.speak(text, lang); }
 
 
   // =========================
-  // Sound FX (tiny, offline)
+  // Sound FX (tiny, offline) (tiny, offline)
   // =========================
   const sfx = (() => {
     let ctx = null;
