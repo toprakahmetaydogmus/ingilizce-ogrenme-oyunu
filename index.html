@@ -943,6 +943,37 @@ html{-webkit-text-size-adjust:100%;}
         <div class="card mt12">
           <div class="row between wrap">
             <div>
+              <div class="h2">🧩 Genel Kültür Quiz</div>
+              <div class="muted">4 şıklı hızlı quiz • rastgele sorular</div>
+            </div>
+            <div class="badge badge--blue" id="quizCountBadge">—</div>
+          </div>
+
+          <div class="grid3 mt12">
+            <button class="bigbtn bigbtn--blue" id="btnQuiz">
+              <div class="bigbtn__icon">🧩</div>
+              <div class="bigbtn__title">Quiz Başlat</div>
+              <div class="bigbtn__sub">cmota/questions.json (A–D)</div>
+            </button>
+
+            <button class="bigbtn bigbtn--neutral" id="btnQuizInfo">
+              <div class="bigbtn__icon">ℹ️</div>
+              <div class="bigbtn__title">Bilgi</div>
+              <div class="bigbtn__sub">Kaynak + offline önbellek</div>
+            </button>
+
+            <button class="bigbtn bigbtn--neutral" id="btnQuizReset">
+              <div class="bigbtn__icon">🧹</div>
+              <div class="bigbtn__title">Quiz Önbelleği</div>
+              <div class="bigbtn__sub">Temizle</div>
+            </button>
+          </div>
+        </div>
+
+
+        <div class="card mt12">
+          <div class="row between wrap">
+            <div>
               <div class="h2">🧠 Tekrar (SRS)</div>
               <div class="muted">Bugün tekrarı gelen kelime sayısı</div>
             </div>
@@ -1457,7 +1488,19 @@ html{-webkit-text-size-adjust:100%;}
     PROGRESS: 'ue_progress_v2',
     LEADER: 'ue_leader_v2',
     DICT_CACHE: 'ue_dict_cache_v3',
+    QUIZ_CACHE: 'ue_quiz_cache_v1',
   };
+
+  // =========================
+  // External Quiz Bank (cmota/questions.json)
+  // =========================
+  const QUIZ = {
+    // Raw URL is more fetch-friendly than the gist HTML page.
+    URL: 'https://gist.githubusercontent.com/cmota/f7919cd962a061126effb2d7118bec72/raw/96ae8cbebd92c97dfbe53ad8927a45a28f8d2358/questions.json',
+    MAX: 2000, // safety cap (file has ~1k+ questions)
+  };
+
+
 
   // =========================
   // UI refs
@@ -1509,6 +1552,11 @@ html{-webkit-text-size-adjust:100%;}
     btnTwoPlayer: $('#btnTwoPlayer'),
     btnLeaderboard: $('#btnLeaderboard'),
     btnProfile: $('#btnProfile'),
+    // quiz
+    quizCountBadge: $('#quizCountBadge'),
+    btnQuiz: $('#btnQuiz'),
+    btnQuizInfo: $('#btnQuizInfo'),
+    btnQuizReset: $('#btnQuizReset'),
     btnReviewDue: $('#btnReviewDue'),
     btnResetHearts: $('#btnResetHearts'),
     dictCountBadge: $('#dictCountBadge'),
@@ -2672,6 +2720,12 @@ html{-webkit-text-size-adjust:100%;}
     ui.dueCount.textContent = String(dueWordsCount());
     if (ui.dictCountBadge) ui.dictCountBadge.textContent = String(dictionary.length);
 
+    // quiz count (cached)
+    if (ui.quizCountBadge) {
+      const qc = loadJSON(LS.QUIZ_CACHE, null);
+      ui.quizCountBadge.textContent = (qc && qc.items && Array.isArray(qc.items)) ? String(qc.items.length) : '—';
+    }
+
   }
 
   function renderLoginStats() {
@@ -2742,8 +2796,14 @@ html{-webkit-text-size-adjust:100%;}
   // Lesson engine
   // =========================
   let lesson = null; // {mode, category, length, index, q, stats, selected, timer...}
+  let gameMode = 'lesson'; // 'lesson' | 'quiz'
+  let lastSession = 'lesson';
+  let quiz = null; // {items, idx, correct, wrong, selected, startedAt}
 
   function startLesson({ mode = 'lesson', category = null, onlyDue = false } = {}) {
+    gameMode = 'lesson';
+    lastSession = 'lesson';
+    quiz = null;
     // mode: 'lesson' | 'practice'
     const length = Number(settings.lessonLength || 15);
     const timeLimit = (mode === 'practice') ? 0 : Number(settings.timeLimit || 30);
@@ -2810,6 +2870,229 @@ html{-webkit-text-size-adjust:100%;}
 
     showView('viewLesson');
     renderLessonQuestion();
+  }
+
+  // =========================
+  // Quiz engine (uses cmota/questions.json)
+  // =========================
+  async function loadQuizBank({ force = false } = {}) {
+    if (!force) {
+      const cached = loadJSON(LS.QUIZ_CACHE, null);
+      if (cached && Array.isArray(cached.items) && cached.items.length) return cached.items;
+    }
+
+    // Fetch remote bank
+    const res = await fetch(QUIZ.URL, { cache: 'no-store' });
+    if (!res.ok) throw new Error('Quiz bank fetch failed: ' + res.status);
+    const items = await res.json();
+
+    if (!Array.isArray(items)) throw new Error('Quiz bank is not an array');
+    const clipped = items.slice(0, QUIZ.MAX).map((q, i) => ({
+      id: q.id ?? i,
+      question: String(q.question ?? '').trim(),
+      A: String(q.A ?? '').trim(),
+      B: String(q.B ?? '').trim(),
+      C: String(q.C ?? '').trim(),
+      D: String(q.D ?? '').trim(),
+      answer: String(q.answer ?? '').trim().toUpperCase(),
+    })).filter(q => q.question && q.A && q.B && q.C && q.D && ['A','B','C','D'].includes(q.answer));
+
+    saveJSON(LS.QUIZ_CACHE, { items: clipped, cachedAt: new Date().toISOString(), src: QUIZ.URL });
+    return clipped;
+  }
+
+  function startQuiz() {
+    gameMode = 'quiz';
+    lastSession = 'quiz';
+    lesson = null; // quiz uses the same UI but different logic
+
+    ui.loadingText.textContent = 'Quiz yükleniyor…';
+    ui.loadingHint.textContent = 'İpucu: 1–4 tuşlarıyla seçenek seçebilirsin.';
+    ui.loadingFill.style.width = '25%';
+    ui.loading.setAttribute('aria-busy', 'true');
+    ui.loading.hidden = false;
+
+    Promise.resolve()
+      .then(() => loadQuizBank())
+      .then((items) => {
+        const seed = ((Date.now() ^ (progress.xp << 1)) >>> 0);
+        const rng = mulberry32(seed);
+        const pool = items.slice();
+        shuffleInPlace(pool, rng);
+
+        const length = Math.min(Number(settings.lessonLength || 15), pool.length);
+        quiz = {
+          items: pool.slice(0, length),
+          idx: 0,
+          correct: 0,
+          wrong: 0,
+          selected: null,
+          startedAt: Date.now(),
+        };
+
+        ui.quizCountBadge.textContent = String(items.length);
+
+        ui.loadingFill.style.width = '100%';
+        ui.loading.hidden = true;
+        ui.loading.setAttribute('aria-busy', 'false');
+        showView('viewLesson');
+
+        // quiz UI tweaks
+        ui.btnHint.hidden = true;
+        ui.exampleBox.hidden = true;
+
+        renderQuizQuestion();
+      })
+      .catch((err) => {
+        ui.loading.hidden = true;
+        ui.loading.setAttribute('aria-busy', 'false');
+        openSheet({
+          ok: false,
+          title: 'Quiz yüklenemedi',
+          sub: 'İnternet bağlantını kontrol et.',
+          answer: '',
+          explain: String(err && err.message ? err.message : err),
+          header: 'warn'
+        });
+      });
+  }
+
+  function currentQuizQ() {
+    if (!quiz || !quiz.items || quiz.idx >= quiz.items.length) return null;
+    return quiz.items[quiz.idx];
+  }
+
+  function renderQuizQuestion() {
+    const q = currentQuizQ();
+    if (!q) return endQuiz();
+
+    // progress UI (reuse)
+    const n = quiz.items.length;
+    ui.qMeta.textContent = `Soru ${quiz.idx + 1}/${n} • Tür: Quiz (Genel Kültür)`;
+    ui.qProgress.style.width = `${Math.round(((quiz.idx) / Math.max(1, n)) * 100)}%`;
+
+    ui.promptLabel.textContent = 'Quiz';
+    ui.promptText.textContent = q.question;
+
+    ui.btnSpeakEN.hidden = true;
+    ui.btnSpeakTR.hidden = true;
+    ui.btnHint.hidden = true;
+    ui.exampleBox.hidden = true;
+
+    quiz.selected = null;
+    ui.answersArea.innerHTML = '';
+
+    const choices = [
+      ['A', q.A],
+      ['B', q.B],
+      ['C', q.C],
+      ['D', q.D],
+    ];
+
+    choices.forEach(([key, text], i) => {
+      const btn = document.createElement('button');
+      btn.className = 'answerbtn';
+      btn.type = 'button';
+      btn.dataset.idx = String(i);
+      btn.innerHTML = `<span class="answerbtn__key">${key}</span><span class="answerbtn__text">${escapeHTML(text)}</span>`;
+      btn.addEventListener('click', () => {
+        selectChoice(i);
+        $$('.answerbtn', ui.answersArea).forEach(b => b.classList.remove('answerbtn--selected'));
+        btn.classList.add('answerbtn--selected');
+      });
+      ui.answersArea.appendChild(btn);
+    });
+  }
+
+  function checkQuizAnswer() {
+    const q = currentQuizQ();
+    if (!q) return;
+
+    if (quiz.selected == null) {
+      openSheet({
+        ok: false,
+        title: 'Seçim yap',
+        sub: 'Devam etmek için bir seçenek seç.',
+        answer: '',
+        explain: 'İpucu: 1–4 tuşlarıyla da seçim yapabilirsin.',
+        header: 'warn'
+      });
+      return;
+    }
+
+    const letters = ['A','B','C','D'];
+    const userKey = letters[quiz.selected];
+    const ok = userKey === q.answer;
+
+    // mark
+    $$('.answerbtn', ui.answersArea).forEach((btn, i) => {
+      btn.disabled = true;
+      const k = letters[i];
+      if (k === q.answer) btn.classList.add('answerbtn--correct');
+      if (k === userKey && !ok) btn.classList.add('answerbtn--wrong');
+    });
+
+    if (ok) quiz.correct++; else quiz.wrong++;
+
+    // feedback sheet
+    const correctText = q[q.answer] || '';
+    openSheet({
+      ok,
+      title: ok ? 'Doğru!' : 'Yanlış',
+      sub: ok ? '+5 XP' : '0 XP',
+      answer: `Doğru cevap: (${q.answer}) ${correctText}`,
+      explain: 'Devam etmek için “Diğer Soru”ya bas.',
+      header: ok ? 'ok' : 'warn',
+      action: 'next'
+    });
+
+    // award XP (optional, consistent with existing system)
+    if (ok) progress.xp = (progress.xp || 0) + 5;
+    saveJSON(LS.PROGRESS, progress);
+    renderTopbar();
+  }
+
+  function nextQuizOrEnd() {
+    if (!quiz) return;
+    quiz.idx++;
+    if (quiz.idx >= quiz.items.length) endQuiz();
+    else renderQuizQuestion();
+  }
+
+  function endQuiz() {
+    if (!quiz) return;
+    const n = quiz.items.length || 0;
+    const xpEarned = quiz.correct * 5;
+
+    // show result view (reuse)
+    showView('viewResult');
+    ui.resultXP.textContent = `+${xpEarned} XP`;
+    ui.resultCorrect.textContent = String(quiz.correct);
+    ui.resultWrong.textContent = String(quiz.wrong);
+    ui.resultRate.textContent = n ? `${Math.round((quiz.correct / n) * 100)}%` : '0%';
+
+    confetti.burst();
+
+    // store score to leaderboard as "Quiz"
+    addToLeaderboard({
+      name: (student && student.name ? student.name : 'Quiz'),
+      score: xpEarned,
+      correct: quiz.correct,
+      wrong: quiz.wrong,
+    });
+
+    quiz = null;
+    gameMode = 'lesson';
+  }
+
+  // Escape helper (for innerHTML usage)
+  function escapeHTML(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
   }
 
   function shuffleInPlace(arr, rng) {
@@ -2950,7 +3233,8 @@ html{-webkit-text-size-adjust:100%;}
   }
 
   function selectChoice(idx) {
-    lesson.selected = idx;
+    if (gameMode === 'quiz' && quiz) quiz.selected = idx;
+    else lesson.selected = idx;
     sfx.tap();
     $$('.answerbtn', ui.answersArea).forEach(b => b.classList.remove('answerbtn--selected'));
     const btn = ui.answersArea.querySelector(`.answerbtn[data-idx="${idx}"]`);
@@ -2958,6 +3242,7 @@ html{-webkit-text-size-adjust:100%;}
   }
 
   function checkAnswer() {
+    if (gameMode === 'quiz') { checkQuizAnswer(); return; }
     const q = currentQ();
 
     let userAnswer = '';
@@ -3828,8 +4113,8 @@ html{-webkit-text-size-adjust:100%;}
         else goBack();
       }
 
-      // keyboard shortcuts in lesson
-      if (lesson && ui.viewLesson.classList.contains('view--active')) {
+      // keyboard shortcuts in lesson / quiz
+      if ((lesson || (gameMode === 'quiz' && quiz)) && ui.viewLesson.classList.contains('view--active')) {
         if (/^[1-4]$/.test(ev.key)) {
           const idx = Number(ev.key) - 1;
           const btn = ui.answersArea.querySelector(`.answerbtn[data-idx="${idx}"]`);
@@ -3913,6 +4198,32 @@ html{-webkit-text-size-adjust:100%;}
     ui.btnTwoPlayer.addEventListener('click', () => { showView('viewTwoPlayerSetup'); renderTwoPlayerCategories(); });
     ui.btnLeaderboard.addEventListener('click', () => { renderLeaderboard(); showView('viewLeaderboard'); });
     ui.btnProfile.addEventListener('click', () => { renderProfile(); showView('viewProfile'); });
+    // quiz
+    ui.btnQuiz.addEventListener('click', startQuiz);
+    ui.btnQuizInfo.addEventListener('click', () => {
+      openSheet({
+        ok: true,
+        title: 'Quiz Kaynağı',
+        sub: 'cmota/questions.json',
+        answer: '',
+        explain: 'Sorular GitHub Gist üzerinden yüklenir ve cihazda önbelleğe alınır (offline destek).',
+        header: 'ok'
+      });
+    });
+    ui.btnQuizReset.addEventListener('click', () => {
+      if (!confirm('Quiz önbelleği temizlensin mi?')) return;
+      localStorage.removeItem(LS.QUIZ_CACHE);
+      ui.quizCountBadge.textContent = '—';
+      openSheet({
+        ok: true,
+        title: 'Temizlendi',
+        sub: 'Quiz önbelleği sıfırlandı.',
+        answer: '',
+        explain: 'Tekrar başlatınca internetten yeniden indirir.',
+        header: 'ok'
+      });
+    });
+
     ui.btnReviewDue.addEventListener('click', () => startLesson({ mode: 'lesson', onlyDue: true }));
     ui.btnResetHearts.addEventListener('click', refillHearts);
 
@@ -4003,12 +4314,21 @@ html{-webkit-text-size-adjust:100%;}
     });
     ui.btnCheck.addEventListener('click', checkAnswer);
     ui.btnSkip.addEventListener('click', () => {
+      if (gameMode === 'quiz') {
+        if (quiz) quiz.wrong++;
+        nextQuizOrEnd();
+        return;
+      }
       stopTimer();
       onAnswer(false, '⏭️ Diğer soru');
     });
 
     // result buttons
     ui.btnAgain.addEventListener('click', () => {
+      if (lastSession === 'quiz') {
+        startQuiz();
+        return;
+      }
       // replay same mode/category if possible
       const mode = (lesson && lesson.mode) ? lesson.mode : 'lesson';
       const category = (lesson && lesson.category) ? lesson.category : null;
@@ -4099,8 +4419,9 @@ html{-webkit-text-size-adjust:100%;}
       }
 
       // Only advance when this sheet was opened as answer feedback
-      if (act === 'next' && lesson && ui.viewLesson.classList.contains('view--active')) {
-        nextQuestionOrEnd();
+      if (act === 'next' && ui.viewLesson.classList.contains('view--active')) {
+        if (gameMode === 'quiz' && quiz) { nextQuizOrEnd(); return; }
+        if (lesson) nextQuestionOrEnd();
       }
     });
     ui.sheetBackdrop.addEventListener('click', () => {
