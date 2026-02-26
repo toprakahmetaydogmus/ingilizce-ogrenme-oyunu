@@ -21,6 +21,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
 
   <style>
+/* ULTIMATE English — Cloudflare Pages (static) */
+/* Design goals: Duolingo-like clarity, big touch targets, accessibility, dark mode, smooth animations. */
 
 :root{
   --bg1:#667eea;
@@ -951,7 +953,7 @@ html{-webkit-text-size-adjust:100%;}
             <button class="bigbtn bigbtn--blue" id="btnQuiz">
               <div class="bigbtn__icon">🧩</div>
               <div class="bigbtn__title">Quiz Başlat</div>
-              <div class="bigbtn__sub">Genel Kültür Soruları (A–D)</div>
+              <div class="bigbtn__sub">cmota/questions.json (A–D)</div>
             </button>
 
             <button class="bigbtn bigbtn--neutral" id="btnQuizInfo">
@@ -1319,10 +1321,13 @@ html{-webkit-text-size-adjust:100%;}
               </div>
               <select class="input input--sm" id="dailyGoal">
                 <option value="200">200 XP</option>
+                <option value="300">300 XP</option>
                 <option value="500" selected>500 XP</option>
                 <option value="800">800 XP</option>
                 <option value="1200">1200 XP</option>
-              </select>
+                <option value="1600">1600 XP</option>
+                <option value="2000">2000 XP</option>
+</select>
             </div>
 
             <div class="row between wrap mt12">
@@ -1362,8 +1367,8 @@ html{-webkit-text-size-adjust:100%;}
               </div>
               <select class="input input--sm" id="maxHearts">
                 <option value="3">3</option>
-                <option value="5" selected>5</option>
-                <option value="7">7</option>
+                <option value="5">5</option>
+                <option value="7" selected>7</option>
                 <option value="999">Sınırsız</option>
               </select>
             </div>
@@ -1983,11 +1988,11 @@ html{-webkit-text-size-adjust:100%;}
     theme: 'light',
     lessonLength: 15,
     timeLimit: 30, // seconds (0=off)
-    dailyGoal: 50,
+    dailyGoal: 500,
     enRate: 0.95,
     trRate: 0.95,
     autoSpeakFirstN: 3,
-    maxHearts: 5,
+    maxHearts: 7,
   };
 
   const defaultProgress = {
@@ -1996,7 +2001,7 @@ html{-webkit-text-size-adjust:100%;}
     totalWrong: 0,
     streak: 0,
     lastActiveDay: null,
-    hearts: 5,
+    hearts: 7,
     dailyXp: {}, // {YYYY-MM-DD: xp}
     wordStats: {}, // {wordId: {box,next,correct,wrong,seen}}
     favorites: {}, // {entryId: true}
@@ -2629,7 +2634,7 @@ html{-webkit-text-size-adjust:100%;}
   // =========================
   function getHeartsMax() {
     const m = Number(settings.maxHearts == null ? 5 : settings.maxHearts);
-    return (m >= 999) ? 999 : clamp(m, 1, 20);
+    return (m >= 999) ? 999 : clamp(m, 3, 9);
   }
 
   function refillHearts() {
@@ -2703,7 +2708,7 @@ html{-webkit-text-size-adjust:100%;}
   function renderHomeStats() {
     const day = todayKey();
     const todayXP = (progress.dailyXp && progress.dailyXp[day]) ? progress.dailyXp[day] : 0;
-    const goal = Number(settings.dailyGoal || 50);
+    const goal = clamp(Number(settings.dailyGoal || 500), 200, 2000);
 
     ui.dailyGoalText.textContent = `${goal} XP`;
     ui.todayXPText.textContent = `${todayXP} XP`;
@@ -4137,7 +4142,7 @@ html{-webkit-text-size-adjust:100%;}
     ui.btnSaveSettings.addEventListener('click', () => {
       settings.lessonLength = Number(ui.lessonLength.value || 15);
       settings.timeLimit = Number(ui.timeLimit.value || 30);
-      settings.dailyGoal = Number(ui.dailyGoal.value || 50);
+      settings.dailyGoal = clamp(Number(ui.dailyGoal.value || 500), 200, 2000);
       settings.enRate = Number(ui.enRate.value || 0.95);
       settings.trRate = Number(ui.trRate.value || 0.95);
       settings.autoSpeakFirstN = Number(ui.autoSpeakFirstN.value || 3);
@@ -4202,7 +4207,7 @@ html{-webkit-text-size-adjust:100%;}
       openSheet({
         ok: true,
         title: 'Quiz Kaynağı',
-        sub: 'Toprak Ahmet Aydoğmuş',
+        sub: 'cmota/questions.json',
         answer: '',
         explain: 'Sorular GitHub Gist üzerinden yüklenir ve cihazda önbelleğe alınır (offline destek).',
         header: 'ok'
@@ -4575,4 +4580,4 @@ html{-webkit-text-size-adjust:100%;}
 </script>
 </body>
 </html>
-//version9.10
+//verison11.0.15
