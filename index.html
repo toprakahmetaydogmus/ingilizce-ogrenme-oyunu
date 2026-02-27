@@ -2193,6 +2193,41 @@ html{-webkit-text-size-adjust:100%;}
       setTimeout(refreshVoices, 1200);
     }
 
+    function ensureVoicesReady(timeoutMs = 900) {
+      if (!synth) return Promise.resolve([]);
+      // If already ready, fast path.
+      try {
+        const v0 = synth.getVoices?.() || [];
+        if (v0.length) { voices = v0; ready = true; return Promise.resolve(v0); }
+      } catch {}
+
+      return new Promise(resolve => {
+        let done = false;
+
+        const finish = () => {
+          if (done) return;
+          done = true;
+          try { synth.removeEventListener?.('voiceschanged', onChange); } catch {}
+          resolve(refreshVoices());
+        };
+
+        const onChange = () => {
+          try {
+            const v = synth.getVoices?.() || [];
+            if (v.length) { voices = v; ready = true; finish(); }
+          } catch { /* ignore */ }
+        };
+
+        try { synth.addEventListener?.('voiceschanged', onChange); } catch {}
+
+        // Safety: do a few refreshes; then give up and resolve with whatever exists.
+        setTimeout(onChange, 60);
+        setTimeout(onChange, 180);
+        setTimeout(onChange, 420);
+        setTimeout(finish, timeoutMs);
+      });
+    }
+
     function pickVoice(targetLang /* 'en' | 'tr' */) {
       const vs = voices || [];
       if (!vs.length) return null;
@@ -2215,8 +2250,7 @@ html{-webkit-text-size-adjust:100%;}
       const nonTr = vs.filter(v => !starts(v, 'tr') && !badNameRe.test(norm(v.name)));
       return (nonTr.find(v => v.localService) || nonTr[0] || null);
     }
-
-    function speak(text, lang /* 'en' | 'tr' */) {
+    async function speak(text, lang /* 'en' | 'tr' */) {
       if (!synth) return;
       const t = String(text ?? '').trim();
       if (!t) return;
@@ -2260,7 +2294,8 @@ html{-webkit-text-size-adjust:100%;}
       const rTr = Number(settings?.trRate ?? 0.95);
       u.rate = isTR ? rTr : rEn;
 
-      // Use cached voices (fast); refresh once if not ready yet.
+      // Ensure voices are loaded before picking (prevents wrong default voice on first speak)
+      if (!ready) { await ensureVoicesReady(900); }
       if (!ready) refreshVoices();
       const v = pickVoice(isTR ? 'tr' : 'en');
       if (v) u.voice = v;
@@ -2269,7 +2304,7 @@ html{-webkit-text-size-adjust:100%;}
       try { synth.speak(u); } catch {}
     }
 
-    return { init, speak, refreshVoices };
+    return { init, speak, refreshVoices, ensureVoicesReady };
   })();
 
   // Initialize TTS once UI is ready
@@ -4728,4 +4763,4 @@ html{-webkit-text-size-adjust:100%;}
   <div id="toast" class="toast" aria-live="polite" aria-atomic="true"></div>
 </body>
 </html>
-//verison11.0.26
+//verison11.0.15
