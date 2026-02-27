@@ -2258,7 +2258,13 @@ html{-webkit-text-size-adjust:100%;}
       if (!vs.length) return null;
 
       const norm = (s) => String(s || '').toLowerCase();
-      const starts = (v, p) => norm(v.lang).startsWith(p);
+      const normLang = (s) => norm(s).replace(/_/g,'-');
+      const starts = (v, p) => {
+        const L = normLang(v.lang);
+        if (p === 'en') return /^(en|eng)(-|$)/.test(L) || L.startsWith('en');
+        if (p === 'tr') return /^tr(-|$)/.test(L) || L.startsWith('tr');
+        return L.startsWith(p);
+      };
 
       // Manual override from Settings (name match)
       if (targetLang === 'en' && settings?.enVoiceName && settings.enVoiceName !== 'auto') {
@@ -2310,6 +2316,12 @@ html{-webkit-text-size-adjust:100%;}
         else toast('⚠️ Cihazında Türkçe (tr-TR) ses yok.', 2500);
         return;
       }
+      u.lang = isTR ? 'tr-TR' : 'en-US';
+      // If the chosen voice has a specific language tag, align utterance.lang to it (prevents some browsers from ignoring the selected voice)
+      try {
+        const vLang = String(voice.lang || '').replace(/_/g,'-');
+        if (vLang) u.lang = vLang;
+      } catch {}
       u.voice = voice;
 
       // TR limit (kart başına): 0=sınırsız, 1/5/10...
@@ -2337,8 +2349,6 @@ html{-webkit-text-size-adjust:100%;}
           speak._trCount = (speak._trCount ?? 0) + 1;
         }
       }
-      u.lang = isTR ? 'tr-TR' : 'en-US';
-
       // Rates from settings (fallbacks are safe defaults)
       const rEn = Number(settings?.enRate ?? 0.95);
       const rTr = Number(settings?.trRate ?? 0.95);
@@ -4849,4 +4859,4 @@ function applyTheme(theme) {
   <div id="toast" class="toast" aria-live="polite" aria-atomic="true"></div>
 </body>
 </html>
-//verison11.0.15
+//verison11.0.66
