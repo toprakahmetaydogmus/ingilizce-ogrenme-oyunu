@@ -1396,7 +1396,27 @@ html{-webkit-text-size-adjust:100%;}
               <input class="range" id="trRate" type="range" min="0.6" max="1.3" step="0.05" value="0.95" />
             </div>
 
+            
             <div class="row between wrap mt12">
+              <div>
+                <div class="label">EN Ses Seçimi</div>
+                <div class="muted small">İngilizce kadın sese öncelik (Auto) — istersen elle seç</div>
+              </div>
+              <select class="select" id="enVoice">
+                <option value="auto">Auto (Kadın öncelikli)</option>
+              </select>
+            </div>
+
+            <div class="row between wrap mt12">
+              <div>
+                <div class="label">TR Ses Seçimi</div>
+                <div class="muted small">Türkçe için varsayılan sesi belirle</div>
+              </div>
+              <select class="select" id="trVoice">
+                <option value="auto">Auto</option>
+              </select>
+            </div>
+<div class="row between wrap mt12">
               <div>
                 <div class="label">Türkçe ses hakkı</div>
                 <div class="muted small">Kart başına TR dinleme limiti</div>
@@ -1714,6 +1734,8 @@ html{-webkit-text-size-adjust:100%;}
     dailyGoal: $('#dailyGoal'),
     enRate: $('#enRate'),
     trRate: $('#trRate'),
+    enVoice: $('#enVoice'),
+    trVoice: $('#trVoice'),
     trSpeakLimit: $('#trSpeakLimit'),
     autoSpeakFirstN: $('#autoSpeakFirstN'),
     maxHearts: $('#maxHearts'),
@@ -2068,6 +2090,8 @@ html{-webkit-text-size-adjust:100%;}
     trSpeakLimit: 0, // 0 = sınırsız, aksi halde TR ses tıklama hakkı (kart başına)
     autoSpeakFirstN: 3,
     maxHearts: 7,
+    enVoiceName: 'auto',
+    trVoiceName: 'auto',
   };
 
   const defaultProgress = {
@@ -2184,8 +2208,9 @@ html{-webkit-text-size-adjust:100%;}
     function init() {
       if (!synth) return;
       refreshVoices();
+      // voiceschanged      try { populateVoiceSelects(); } catch {}
       // voiceschanged is the canonical way to know when voices are available
-      synth.addEventListener?.('voiceschanged', refreshVoices);
+      synth.addEventListener?.('voiceschanged', () => { refreshVoices(); try { populateVoiceSelects(); } catch {} });
 
       // Also do a couple of delayed refreshes (Safari/iOS sometimes misses early calls)
       setTimeout(refreshVoices, 150);
@@ -2235,18 +2260,33 @@ html{-webkit-text-size-adjust:100%;}
       const norm = (s) => String(s || '').toLowerCase();
       const starts = (v, p) => norm(v.lang).startsWith(p);
 
+      // Manual override from Settings (name match)
+      if (targetLang === 'en' && settings?.enVoiceName && settings.enVoiceName !== 'auto') {
+        const wanted = String(settings.enVoiceName);
+        const hit = vs.find(v => v.name === wanted && starts(v, 'en'));
+        if (hit) return hit;
+      }
+      if (targetLang === 'tr' && settings?.trVoiceName && settings.trVoiceName !== 'auto') {
+        const wanted = String(settings.trVoiceName);
+        const hit = vs.find(v => v.name === wanted && starts(v, 'tr'));
+        if (hit) return hit;
+      }
+
       if (targetLang === 'tr') {
         const tr = vs.filter(v => starts(v, 'tr'));
         return tr.find(v => v.localService) || tr[0] || null;
       }
 
-      // EN:
-      // 1) prefer en-*
-      // 2) otherwise pick any non-TR voice (to avoid "TRAYİN" with a TR voice)
-      // 3) never pick voices with names that look Turkish (Tolga/Turkish/etc.)
+      // EN (Auto): strongly prefer an actual EN voice, and (if possible) female-sounding names
+      const femaleNameRe = /(female|woman|samantha|victoria|karen|tessa|moira|zira|aria|jenny|natasha|serena|sonia|susan|emily|olivia|amy|emma|ava)/i;
+
       const en = vs.filter(v => starts(v, 'en') && !badNameRe.test(norm(v.name)));
+      const enFemale = en.filter(v => femaleNameRe.test(v.name));
+
+      if (enFemale.length) return enFemale.find(v => v.localService) || enFemale[0];
       if (en.length) return en.find(v => v.localService) || en[0];
 
+      // Absolute fallback: never allow TR voice for EN
       const nonTr = vs.filter(v => !starts(v, 'tr') && !badNameRe.test(norm(v.name)));
       return (nonTr.find(v => v.localService) || nonTr[0] || null);
     }
@@ -2262,6 +2302,16 @@ html{-webkit-text-size-adjust:100%;}
 
       const u = new SpeechSynthesisUtterance(t);
       const isTR = (lang === 'tr');
+
+      // Voice must match language; otherwise browsers may default to TR voice on TR devices.
+      const voice = pickVoice(lang);
+      if (!voice) {
+        if (lang === 'en') toast('⚠️ Cihazında İngilizce (en-*) ses yok. (Ayarlar → EN Ses Seçimi)', 3000);
+        else toast('⚠️ Cihazında Türkçe (tr-TR) ses yok.', 2500);
+        return;
+      }
+      u.voice = voice;
+
       // TR limit (kart başına): 0=sınırsız, 1/5/10...
       if (isTR) {
         const limit = Number(settings?.trSpeakLimit ?? 0);
@@ -4256,6 +4306,9 @@ html{-webkit-text-size-adjust:100%;}
     ui.enRate.value = String(settings.enRate || 0.95);
     ui.trRate.value = String(settings.trRate || 0.95);
     ui.trSpeakLimit.value = String(settings.trSpeakLimit == null ? 0 : settings.trSpeakLimit);
+    ui.enVoice.value = String(settings.enVoiceName || 'auto');
+    ui.trVoice.value = String(settings.trVoiceName || 'auto');
+    populateVoiceSelects();
     ui.autoSpeakFirstN.value = String(settings.autoSpeakFirstN == null ? 3 : settings.autoSpeakFirstN);
     ui.maxHearts.value = String(settings.maxHearts == null ? 5 : settings.maxHearts);
   }
@@ -4264,7 +4317,38 @@ html{-webkit-text-size-adjust:100%;}
     ui.drawerSettings.setAttribute('aria-hidden', 'true');
   }
 
-  function applyTheme(theme) {
+  
+  function populateVoiceSelects() {
+    try {
+      const vs = (window.speechSynthesis && window.speechSynthesis.getVoices) ? window.speechSynthesis.getVoices() : [];
+      const fill = (sel, prefix, current) => {
+        if (!sel) return;
+        const keep = String(current || 'auto');
+        sel.innerHTML = '';
+        const optAuto = document.createElement('option');
+        optAuto.value = 'auto';
+        optAuto.textContent = (prefix === 'en') ? 'Auto (Kadın öncelikli)' : 'Auto';
+        sel.appendChild(optAuto);
+
+        const list = (vs || []).filter(v => String(v.lang||'').toLowerCase().startsWith(prefix));
+        // localService first, then name
+        list.sort((a,b) => (b.localService===a.localService? String(a.name).localeCompare(String(b.name)) : (b.localService?1:-1)));
+        for (const v of list) {
+          const o = document.createElement('option');
+          o.value = v.name;
+          o.textContent = `${v.name} (${v.lang})`;
+          sel.appendChild(o);
+        }
+        // restore
+        sel.value = [...sel.options].some(o=>o.value===keep) ? keep : 'auto';
+      };
+
+      fill(ui.enVoice, 'en', settings.enVoiceName);
+      fill(ui.trVoice, 'tr', settings.trVoiceName);
+    } catch {}
+  }
+
+function applyTheme(theme) {
     const t = (theme === 'dark') ? 'dark' : 'light';
     document.documentElement.setAttribute('data-theme', t);
   }
@@ -4327,6 +4411,8 @@ html{-webkit-text-size-adjust:100%;}
       settings.enRate = Number(ui.enRate.value || 0.95);
       settings.trRate = Number(ui.trRate.value || 0.95);
       settings.trSpeakLimit = Number(ui.trSpeakLimit.value || 0);
+      settings.enVoiceName = String(ui.enVoice?.value || 'auto');
+      settings.trVoiceName = String(ui.trVoice?.value || 'auto');
       settings.autoSpeakFirstN = Number(ui.autoSpeakFirstN.value || 3);
       settings.maxHearts = Number(ui.maxHearts.value || 5);
 
