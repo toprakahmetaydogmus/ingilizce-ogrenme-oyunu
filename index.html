@@ -745,6 +745,56 @@ body{background-color:#111827;} /* fallback */
 /* prevent iOS text auto zoom issues */
 html{-webkit-text-size-adjust:100%;}
 
+
+
+  /* ===== RGB Animated Background (requested) ===== */
+  body::before{
+    content:"";
+    position:fixed;
+    inset:-40vh -40vw;
+    z-index:-1;
+    background: linear-gradient(120deg,
+      rgba(255,0,0,0.35),
+      rgba(0,255,0,0.30),
+      rgba(0,120,255,0.35),
+      rgba(255,0,200,0.28),
+      rgba(255,0,0,0.35)
+    );
+    background-size: 400% 400%;
+    animation: rgbShift 16s ease-in-out infinite;
+    filter: blur(28px) saturate(1.35);
+    transform: translateZ(0);
+    pointer-events:none;
+  }
+  @keyframes rgbShift{
+    0%{background-position:0% 50%}
+    50%{background-position:100% 50%}
+    100%{background-position:0% 50%}
+  }
+
+  /* ===== Tiny toast ===== */
+  .toast{
+    position: fixed;
+    left: 50%;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
+    transform: translateX(-50%);
+    padding: 10px 14px;
+    border-radius: 14px;
+    background: rgba(20,20,24,0.82);
+    color: #fff;
+    font-size: 13px;
+    line-height: 1.25;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .18s ease, transform .18s ease;
+    max-width: min(92vw, 520px);
+    text-align: center;
+  }
+  .toast.show{
+    opacity: 1;
+    transform: translateX(-50%) translateY(-2px);
+  }
 </style>
 </head>
 
@@ -1348,6 +1398,19 @@ html{-webkit-text-size-adjust:100%;}
 
             <div class="row between wrap mt12">
               <div>
+                <div class="label">Türkçe ses hakkı</div>
+                <div class="muted small">Kart başına TR dinleme limiti</div>
+              </div>
+              <select class="select" id="trSpeakLimit">
+                <option value="0">Sınırsız</option>
+                <option value="1">1</option>
+                <option value="5">5</option>
+                <option value="10">10</option>
+              </select>
+            </div>
+
+            <div class="row between wrap mt12">
+              <div>
                 <div class="label">Otomatik EN Okuma</div>
                 <div class="muted small">Dersin başında (normal mod) İngilizce kelime otomatik okunur.</div>
               </div>
@@ -1430,6 +1493,16 @@ html{-webkit-text-size-adjust:100%;}
   // Helpers
   // =========================
   const $ = (sel, root = document) => root.querySelector(sel);
+  const showToast = (msg, ms = 1600) => {
+    const el = document.getElementById('toast');
+    if (!el) return;
+    el.textContent = String(msg ?? '');
+    el.classList.add('show');
+    try { navigator.vibrate && navigator.vibrate(35); } catch {}
+    window.clearTimeout(showToast._t);
+    showToast._t = window.setTimeout(() => el.classList.remove('show'), ms);
+  };
+
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
   const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
   const now = () => Date.now();
@@ -1641,6 +1714,7 @@ html{-webkit-text-size-adjust:100%;}
     dailyGoal: $('#dailyGoal'),
     enRate: $('#enRate'),
     trRate: $('#trRate'),
+    trSpeakLimit: $('#trSpeakLimit'),
     autoSpeakFirstN: $('#autoSpeakFirstN'),
     maxHearts: $('#maxHearts'),
     btnSaveSettings: $('#btnSaveSettings'),
@@ -1991,6 +2065,7 @@ html{-webkit-text-size-adjust:100%;}
     dailyGoal: 500,
     enRate: 0.95,
     trRate: 0.95,
+    trSpeakLimit: 0, // 0 = sınırsız, aksi halde TR ses tıklama hakkı (kart başına)
     autoSpeakFirstN: 3,
     maxHearts: 7,
   };
@@ -2153,6 +2228,31 @@ html{-webkit-text-size-adjust:100%;}
 
       const u = new SpeechSynthesisUtterance(t);
       const isTR = (lang === 'tr');
+      // TR limit (kart başına): 0=sınırsız, 1/5/10...
+      if (isTR) {
+        const limit = Number(settings?.trSpeakLimit ?? 0);
+        if (limit > 0) {
+          // Determine a "current card key" (lesson or quiz)
+          let key = null;
+          try {
+            if (typeof gameMode !== 'undefined' && gameMode === 'quiz' && typeof currentQuizQ === 'function') {
+              const q = currentQuizQ();
+              key = q?.id ?? q?.word ?? q?.tr ?? null;
+            } else if (typeof currentQ === 'function') {
+              const q = currentQ();
+              key = q?.id ?? q?.word ?? q?.tr ?? null;
+            }
+          } catch {}
+          if (key == null) key = '__global__';
+
+          if (speak._trKey !== key) { speak._trKey = key; speak._trCount = 0; }
+          if ((speak._trCount ?? 0) >= limit) {
+            showToast(`TR ses hakkın doldu (${limit}). Ayarlardan artırabilirsin.`);
+            return;
+          }
+          speak._trCount = (speak._trCount ?? 0) + 1;
+        }
+      }
       u.lang = isTR ? 'tr-TR' : 'en-US';
 
       // Rates from settings (fallbacks are safe defaults)
@@ -2890,15 +2990,60 @@ html{-webkit-text-size-adjust:100%;}
     const items = await res.json();
 
     if (!Array.isArray(items)) throw new Error('Quiz bank is not an array');
-    const clipped = items.slice(0, QUIZ.MAX).map((q, i) => ({
-      id: q.id ?? i,
-      question: String(q.question ?? '').trim(),
-      A: String(q.A ?? '').trim(),
-      B: String(q.B ?? '').trim(),
-      C: String(q.C ?? '').trim(),
-      D: String(q.D ?? '').trim(),
-      answer: String(q.answer ?? '').trim().toUpperCase(),
-    })).filter(q => q.question && q.A && q.B && q.C && q.D && ['A','B','C','D'].includes(q.answer));
+    const getOpt = (obj, keys) => {
+      for (const k of keys) {
+        const v = obj?.[k];
+        if (v != null && String(v).trim() !== '') return String(v).trim();
+      }
+      return '';
+    };
+    const getOptionsFromArray = (obj) => {
+      const arr = obj?.options || obj?.choices || obj?.answers;
+      if (Array.isArray(arr)) {
+        const a = arr.map(x => (x==null?'':String(x).trim())).filter(Boolean);
+        return a.length ? a : null;
+      }
+      return null;
+    };
+    const normalizeAnswer = (ans) => {
+      if (ans == null) return '';
+      // number-like (0..3 or 1..4)
+      if (typeof ans === 'number') {
+        const n = ans;
+        if (n >= 0 && n <= 3) return ['A','B','C','D'][n];
+        if (n >= 1 && n <= 4) return ['A','B','C','D'][n-1];
+      }
+      const s = String(ans).trim().toUpperCase();
+      if (['A','B','C','D'].includes(s)) return s;
+      if (['1','2','3','4'].includes(s)) return ['A','B','C','D'][Number(s)-1];
+      if (['0','1','2','3'].includes(s) && s.length===1) return ['A','B','C','D'][Number(s)];
+      // 'a)' 'b.' etc
+      const m = s.match(/([ABCD])/);
+      return m ? m[1] : '';
+    };
+
+    const clipped = items.slice(0, QUIZ.MAX).map((q, i) => {
+      const qText = String(q?.question ?? q?.q ?? q?.text ?? '').trim();
+      // support both uppercase/lowercase keys and array-based options
+      const arrOpts = getOptionsFromArray(q);
+      let A = getOpt(q, ['A','a']);
+      let B = getOpt(q, ['B','b']);
+      let C = getOpt(q, ['C','c']);
+      let D = getOpt(q, ['D','d']);
+      if (arrOpts && arrOpts.length >= 4) {
+        A = A || arrOpts[0];
+        B = B || arrOpts[1];
+        C = C || arrOpts[2];
+        D = D || arrOpts[3];
+      }
+      const ans = normalizeAnswer(q?.answer ?? q?.correct ?? q?.correctAnswer ?? q?.key ?? q?.solution);
+      return {
+        id: q?.id ?? i,
+        question: qText,
+        A, B, C, D,
+        answer: ans,
+      };
+    }).filter(q => q.question && q.A && q.B && q.C && q.D && ['A','B','C','D'].includes(q.answer));
 
     saveJSON(LS.QUIZ_CACHE, { items: clipped, cachedAt: new Date().toISOString(), src: QUIZ.URL });
     return clipped;
@@ -4075,6 +4220,7 @@ html{-webkit-text-size-adjust:100%;}
     ui.dailyGoal.value = String(settings.dailyGoal || 50);
     ui.enRate.value = String(settings.enRate || 0.95);
     ui.trRate.value = String(settings.trRate || 0.95);
+    ui.trSpeakLimit.value = String(settings.trSpeakLimit == null ? 0 : settings.trSpeakLimit);
     ui.autoSpeakFirstN.value = String(settings.autoSpeakFirstN == null ? 3 : settings.autoSpeakFirstN);
     ui.maxHearts.value = String(settings.maxHearts == null ? 5 : settings.maxHearts);
   }
@@ -4145,6 +4291,7 @@ html{-webkit-text-size-adjust:100%;}
       settings.dailyGoal = clamp(Number(ui.dailyGoal.value || 500), 200, 2000);
       settings.enRate = Number(ui.enRate.value || 0.95);
       settings.trRate = Number(ui.trRate.value || 0.95);
+      settings.trSpeakLimit = Number(ui.trSpeakLimit.value || 0);
       settings.autoSpeakFirstN = Number(ui.autoSpeakFirstN.value || 3);
       settings.maxHearts = Number(ui.maxHearts.value || 5);
 
@@ -4578,6 +4725,7 @@ html{-webkit-text-size-adjust:100%;}
 })();
 
 </script>
+  <div id="toast" class="toast" aria-live="polite" aria-atomic="true"></div>
 </body>
 </html>
-//verison11.0.15
+//verison11.0.26
