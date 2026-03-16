@@ -16888,15 +16888,17 @@ const FALLBACK = [
         lesson.timeLeft = lesson.timeLimit;
         setMeta();
         lesson.timer = setInterval(() => {
-          lesson.timeLeft -= 1;
-          setMeta();
-          if (lesson.timeLeft <= 0) {
-            stopTimer();
-            // auto mark wrong
-            onAnswer(false, '⏰ Süre doldu');
-          }
-        }, 1000);
-      }
+  if (!lesson || !ui.viewLesson.classList.contains('view--active')) {
+    stopTimer();
+    return;
+  }
+  lesson.timeLeft -= 1;
+  setMeta();
+  if (lesson.timeLeft <= 0) {
+    stopTimer();
+    onAnswer(false, '⏰ Süre doldu');
+  }
+}, 1000);
 
       function stopTimer() {
         if (lesson && lesson.timer) clearInterval(lesson.timer);
