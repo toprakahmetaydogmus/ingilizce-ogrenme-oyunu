@@ -16205,18 +16205,10 @@ const FALLBACK = [
       // =========================
       // Views & navigation
       // =========================
-      const views = [
-        ui.viewLogin,
-        ui.viewHome,
-        ui.viewCategories,
-        ui.viewWords,
-        ui.viewLesson,
-        ui.viewResult,
-        ui.viewLeaderboard,
-        ui.viewProfile,
-        ui.viewTwoPlayerSetup,
-        ui.viewTwoPlayerGame
-      ];
+      // =========================
+            // Views & navigation
+            // =========================
+      const views = Array.from(document.querySelectorAll('.view'));
 
       let viewStack = []; // for back button
 
