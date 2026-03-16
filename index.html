@@ -16203,12 +16203,13 @@ const FALLBACK = [
       }
 
       // =========================
-      // Views & navigation
-      // =========================
-      // =========================
             // Views & navigation
             // =========================
-      const views = Array.from(document.querySelectorAll('.view'));
+       const views = [
+            ui.viewLogin, ui.viewHome, ui.viewCategories, ui.viewWords, ui.viewLesson,
+            ui.viewResult, ui.viewLeaderboard, ui.viewProfile, ui.viewTwoPlayerSetup, ui.viewTwoPlayerGame,
+             $('#viewTournamentSetup'), $('#viewTournamentBracket'), $('#viewTournamentMatch')
+         ];
 
       let viewStack = []; // for back button
 
