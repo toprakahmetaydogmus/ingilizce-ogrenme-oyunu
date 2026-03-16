@@ -16221,7 +16221,7 @@ const FALLBACK = [
       let viewStack = []; // for back button
 
       function showView(viewId, { push = true } = {}) {
-        for (const v of views) v.classList.remove('view--active');
+  $$('.view').forEach(v => v.classList.remove('view--active'));
         const el = typeof viewId === 'string' ? $('#' + viewId) : viewId;
         el.classList.add('view--active');
 
