@@ -16214,18 +16214,23 @@ const FALLBACK = [
       let viewStack = []; // for back button
 
       function showView(viewId, { push = true } = {}) {
-        for (const v of views) v.classList.remove('view--active');
-        const el = typeof viewId === 'string' ? $('#' + viewId) : viewId;
-        el.classList.add('view--active');
-
-        const name = el.getAttribute('data-view');
-        ui.btnBack.style.visibility = (name === 'home' || name === 'login') ? 'hidden' : 'visible';
-
-        if (push) {
-          const current = viewStack[viewStack.length - 1];
-          if (current !== viewId) viewStack.push(viewId);
-        }
-      }
+    // 1. Ekrandaki TÜM sayfaları zorla gizle (Eski listeyi umursamaz, garantidir)
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('view--active'));
+    
+    // 2. Sadece istenen sayfayı aktif et
+    const el = typeof viewId === 'string' ? document.getElementById(viewId) : viewId;
+    if(el) el.classList.add('view--active');
+    
+    // 3. Geri butonunun görünürlüğünü ayarla
+    const name = el ? el.getAttribute('data-view') : '';
+    document.getElementById('btnBack').style.visibility = (name === 'home' || name === 'login') ? 'hidden' : 'visible';
+    
+    // 4. Geri dönmek için sayfa geçmişini kaydet
+    if (push) {
+        const current = viewStack[viewStack.length - 1];
+        if (current !== viewId) viewStack.push(viewId);
+    }
+}
 
       function goBack() {
         if (viewStack.length <= 1) {
