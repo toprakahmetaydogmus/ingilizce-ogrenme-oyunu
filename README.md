@@ -1,64 +1,34 @@
-# 🎓 ULTIMATE English — Toprak Ahmet Aydoğmuş 🚀
+# 🎓 ULTIMATE English — Interactive Vocabulary & Grammar Mastery Platform
 
-[![Build Status](https://img.shields.io/badge/Status-Live-green.svg)]((https://toprakahmetaydogmus.vercel.app))
-[![Version](https://img.shields.io/badge/Version-11.0.66-blue.svg)](#)
-[![License](https://img.shields.io/badge/License-Private-orange.svg)](#)
+[![Status: Live](https://img.shields.io/badge/Status-Live-brightgreen.svg)](https://toprakahmetaydogmus.vercel.app)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Stack: HTML5 / CSS3 / JS](https://img.shields.io/badge/Stack-Modern%20Web-orange.svg)](#)
 
-**ULTIMATE English**, İngilizce öğrenmeyi tamamen oyunlaştıran, Duolingo tarzı netlik ile modern tasarımı birleştiren kapsamlı bir dil öğrenme platformudur. 2000'den fazla dinamik soru, Spaced Repetition (SRS) desteği ve çevrimdışı çalışma moduyla en iyi deneyimi sunar.
-
----
-
-## ✨ Öne Çıkan Özellikler
-
-- **🎯 Zengin Soru Havuzu**: 2000+ dinamik soru; Çoktan seçmeli, Yazma, Dinleme ve Boşluk Doldurma modları.
-- **🧠 Akıllı Tekrar (SRS)**: Leitner sistemi tabanlı algoritma ile kelimeleri tam unutacakken karşınıza çıkarır.
-- **🔊 Sesli Öğrenme**: Web Speech API ile akıcı İngilizce (EN) ve Türkçe (TR) seslendirme.
-- **🏅 Turnuva & Yarışma**: Sınıf içi turnuvalar için eleme ağacı (Tournament Bracket) ve iki kişilik (VS) modu.
-- **📦 PWA (Offline) Desteği**: İnternetiniz olmasa bile yüklü sözlük ve Service Worker ile çalışmaya devam edin.
-- **🌙 Dinamik Tasarım**: Glassmorphism efektleri, premium animasyonlar ve tam uyumlu karanlık mod.
-- **📊 Gelişmiş İstatistikler**: Günlük XP hedefleri, seri (streak) takibi ve yerel liderlik tablosu.
+Developer: **Toprak Ahmet Aydoğmuş**
 
 ---
 
-## 🎮 Oyun Modları
+## 🎯 1. Overview
+**ULTIMATE English** is a web-based language acquisition application built with interactive gamification mechanics, spaced repetition vocabulary drills, listening comprehension quizzes, and instant grammar feedback.
 
-| Mod | Açıklama |
-| :--- | :--- |
-| **🎯 Analiz/Ders** | Yeni kelimeler ve tekrar edilmesi gerekenler (70/30 dengesi). |
-| **💪 Pratik** | Can sınırı ve süre olmadan sınırsız kelime çalışması. |
-| **📚 Kategoriler** | Sadece seçtiğiniz konuya (A1/A2, Yemekler, Fiiller vb.) odaklanın. |
-| **🏅 Turnuva** | 4-16 kişi arasında eleme usulü okul turnuvası düzenleyin. |
-| **👥 İki Kişilik** | Aynı cihaz üzerinde arkadaşınızla yarışın. |
-| **🧩 Quiz** | Genel kültür ve hızlı soru-cevap bölümleri. |
+### Key Highlights:
+- **Spaced Repetition Flashcards:** Algorithmically surfaces difficult words to maximize retention.
+- **Interactive Mini-Games:** Word matching, sentence scrambles, and rapid-fire audio recognition.
+- **Progress Tracking:** In-depth statistics on words mastered, daily streaks, and skill CEFR levels (A1 to C2).
 
 ---
 
-## 🛠️ Kurulum & Çalıştırma
+## 🚀 2. Quick Start
 
-Proje tamamen statik (HTML/JS/CSS) olduğu için herhangi bir sunucu kurulumu gerektirmez.
-
-1. Depoyu klonlayın:
-   ```bash
-   git clone https://github.com/toprakahmetaydogmus/ingilizce-ogrenme-oyunu.git
-   ```
-2. `index.html` dosyasını tarayıcınızda açın.
-3. Veya (https://toprakahmetaydogmus.vercel.app) üzerinden doğrudan oynayın.
+```bash
+git clone https://github.com/toprakahmetaydogmus/ingilizce-ogrenme-oyunu.git
+cd ingilizce-ogrenme-oyunu
+# Open index.html in your browser or run:
+python -m http.server 8080
+```
 
 ---
 
-## 🚀 Teknolojiler
-
-- **Frontend**: Vanilla HTML5, Vanilla CSS3 (Custom Variables), ES6+ JavaScript.
-- **Veri**: JSON tabanlı dinamik sözlük yapısı.
-- **PWA**: Service Worker & Web App Manifest.
-- **Ekstralar**: Web Speech API, AudioContext FX, Confetti.js.
-
----
-
-## 📢 İletişim
-
-Geliştiren: **Toprak Ahmet Aydoğmuş**
-🔗 [hopp.bio/siberegitim](https://hopp.bio/siberegitim)
-
----
-*Bu proje eğitim amaçlı geliştirilmiş olup tüm hakları saklıdır.*
+## 📜 3. License
+Licensed under the [MIT License](LICENSE).  
+Developer: **Toprak Ahmet Aydoğmuş**.
